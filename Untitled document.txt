@@ -1,0 +1,520 @@
+﻿1.Competition Overview 
+Theme
+The project must involve star systems where gravity drives motion.
+Your simulation should demonstrate how gravitational forces influence the movement of objects such as:
+* Stars
+* Planets
+* Moons
+* Asteroids
+* Spacecraft
+* Binary or multiple-star systems
+The project can be based on:
+1. Real astronomical data
+2. Invented or procedurally generated star systems
+3. A combination of real science and creative simulation
+The goal is not simply to create a beautiful space animation. The system should demonstrate some meaningful relationship between gravity, orbital motion, and physical behaviour.
+2. Judging Criteria
+Category
+	Marks
+	What It Means
+	Scientific accuracy
+	40
+	Correct physics, gravity, orbital motion, and clearly stated approximations
+	Creativity
+	35
+	Original concept, interesting interaction, unique system or experience
+	Design and visuals
+	25
+	Attractive interface, readable visualizations, polished presentation
+	Total
+	100
+	
+
+	Important implication
+Scientific accuracy has the highest weight, so our project should include at least a few verifiable physics principles, such as:
+* Newtonian gravity
+* Kepler's laws
+* Orbital velocity
+* Energy conservation
+* Stable and unstable orbits
+* Binary-star motion
+* Habitable zones
+* Gravitational slingshots
+We do not need to simulate the entire universe accurately. We need to make reasonable approximations and explain them honestly in the README.
+3. Real Skies and Invented Worlds
+The website provides two broad directions.
+A. Real astronomical systems
+We can use information from the Yale Bright Star Catalog, which contains approximately 9,100 stars.
+The catalogue includes information such as:
+* Right ascension (RA)
+* Declination
+* Apparent magnitude
+* B−V colour index
+Possible use
+We could select real stars and use their data to create a visual star map.
+However, the catalogue information alone does not necessarily provide all the data required for a complete gravitational simulation. We may need to use approximations or generate additional properties.
+We must clearly distinguish between:
+* Observed data
+* Estimated properties
+* Invented simulation parameters
+Do not claim that a system is scientifically observed if we have generated its planets or orbital parameters ourselves.
+B. Invented or procedural worlds
+We can generate a star system using mathematical relationships and assumptions.
+For example:
+* Generate a star based on its mass
+* Estimate its luminosity and radius
+* Calculate its temperature
+* Determine an approximate habitable zone
+* Place planets at different distances
+* Simulate their gravitational motion
+This approach gives us more creative freedom and is likely more manageable within the short deadline.
+Important
+An invented system is acceptable as long as:
+1. Its physics is explained.
+2. The assumptions are stated.
+3. The simulation behaves consistently.
+4. We do not present fictional parameters as real astronomical measurements.
+4. Stellar Properties and Approximate Relationships
+The website provides approximate main-sequence relationships.
+Let:
+* MMM = stellar mass
+* LLL = luminosity
+* RRR = stellar radius
+* TTT = stellar surface temperature
+Values are expressed relative to the Sun.
+A. Mass–luminosity relationship
+LL⊙≈(MM⊙)3.5\frac{L}{L_{\odot}} \approx \left(\frac{M}{M_{\odot}}\right)^{3.5}L⊙​L​≈(M⊙​M​)3.5
+This estimates how luminous a main-sequence star is based on its mass.
+Example
+For a star with half the Sun's mass:
+M=0.5M⊙M = 0.5M_{\odot}M=0.5M⊙​
+L≈0.53.5L \approx 0.5^{3.5}L≈0.53.5
+This gives a rough luminosity estimate, not an exact real-world value.
+B. Mass–radius relationship
+RR⊙≈(MM⊙)0.8\frac{R}{R_{\odot}} \approx \left(\frac{M}{M_{\odot}}\right)^{0.8}R⊙​R​≈(M⊙​M​)0.8
+This estimates stellar radius from stellar mass.
+These relationships are approximations and may not accurately represent:
+* Giant stars
+* White dwarfs
+* Neutron stars
+* Evolved stars
+* Very massive stars
+* Stars outside the intended main-sequence range
+Therefore, our README should specify that the model is intended for an approximate main-sequence star.
+C. Temperature relationship
+Using the Stefan–Boltzmann relationship:
+T=T⊙(LR2)1/4T = T_{\odot} \left(\frac{L}{R^2}\right)^{1/4}T=T⊙​(R2L​)1/4
+where the luminosity and radius are measured relative to the Sun.
+This allows us to estimate the star's surface temperature.
+Possible visual application
+We can use the estimated temperature to determine the star's approximate colour:
+* Cooler stars → reddish or orange
+* Intermediate-temperature stars → yellowish or white
+* Hotter stars → bluish-white
+The colour should be treated as a visual approximation rather than a perfect physical rendering.
+5. B−V Colour Index
+The B−V value is an astronomical colour index.
+It can help us estimate the apparent colour and approximate temperature of a star.
+For a real-data project:
+1. Load the star catalogue.
+2. Read the B−V value.
+3. Convert it into an approximate visual colour.
+4. Display the stars using that colour.
+Important limitation
+The B−V value is not the same as an exact RGB colour code. We should use a documented approximation or a simple colour mapping.
+If we do not have enough time to build a detailed conversion model, we can use a clearly stated simplified mapping.
+6. Habitable Zone
+The approximate habitable-zone distance is given by:
+rHZ≈LS AUr_{\text{HZ}} \approx \sqrt{\frac{L}{S}}\ \text{AU}rHZ​≈SL​​ AU
+where:
+* LLL = stellar luminosity relative to the Sun
+* SSS = assumed stellar flux threshold
+* rHZr_{\text{HZ}}rHZ​ = distance in astronomical units
+For a simplified solar-flux assumption where S=1S=1S=1:
+rHZ≈L AUr_{\text{HZ}} \approx \sqrt{L}\ \text{AU}rHZ​≈L​ AU
+Meaning
+The habitable zone is the region where conditions may allow liquid water under suitable atmospheric conditions.
+It does not mean that a planet inside the zone is automatically habitable.
+We should avoid claiming that our planets definitely contain life or liquid water unless we have additional atmospheric and environmental modelling.
+Possible visual feature
+Display a translucent ring around the star labelled:
+Approximate Habitable Zone
+This can add both scientific value and visual appeal.
+7. Snow Line
+The website gives an approximate snow-line relationship of the form:
+rsnow≈2.7L AUr_{\text{snow}} \approx 2.7\sqrt{L}\ \text{AU}rsnow​≈2.7L​ AU
+The snow line represents a region beyond which volatile materials such as water ice can remain frozen during planet formation under simplified assumptions.
+Possible visual feature
+Display another ring labelled:
+Approximate Snow Line
+The habitable zone and snow line should be visually distinguished because they represent different concepts.
+8. Gravity and N-Body Simulation
+The central physical principle is Newton's law of universal gravitation:
+F=Gm1m2r2F = \frac{Gm_1m_2}{r^2}F=r2Gm1​m2​​
+where:
+* FFF = gravitational force
+* GGG = gravitational constant
+* m1,m2m_1,m_2m1​,m2​ = object masses
+* rrr = distance between the objects
+In a simulation, we generally calculate acceleration rather than directly moving objects using force.
+a=Fma = \frac{F}{m}a=mF​
+For an object attracted to another body:
+a⃗=GMr3r⃗\vec{a} = \frac{GM}{r^3}\vec{r}a=r3GM​r
+The exact vector implementation will depend on the coordinate system and direction used in the code.
+N-body computation
+An N-body simulation calculates the gravitational influence between multiple objects.
+Examples:
+* One star and several planets
+* Two stars and planets
+* A star, planets, and asteroids
+* A spacecraft moving through a multi-body system
+The naive approach has approximately:
+O(n2)O(n^2)O(n2)
+computational complexity because each object interacts with many other objects.
+The number of unique object pairs is:
+n(n−1)2\frac{n(n-1)}{2}2n(n−1)​
+Practical guideline
+For a browser-based project with a short deadline:
+* Use a manageable number of bodies.
+* Avoid creating thousands of physically simulated objects.
+* Use visual-only particles if necessary.
+* Keep the physics simulation separate from decorative effects.
+9. Kepler's Law and Orbital Validation
+The website asks us to test orbital behaviour using Kepler's law.
+For a simplified two-body system using astronomical units, solar masses, and years:
+P2≈a3MP^2 \approx \frac{a^3}{M}P2≈Ma3​
+where:
+* PPP = orbital period in years
+* aaa = orbital semi-major axis in AU
+* MMM = central mass in solar masses
+For a planet orbiting a star with approximately one solar mass:
+P2≈a3P^2 \approx a^3P2≈a3
+Why this matters
+We should not only make planets visually orbit. We should check whether the orbital period is approximately consistent with the expected relationship.
+Possible validation panel:
+Expected period: 1.00 years
+Simulated period: 1.04 years
+Difference: 4.0%
+The values above are only an example of the format. We should calculate actual values from our simulation.
+10. Energy Drift
+A simulation can look correct while gradually becoming physically unstable.
+Energy drift measures how much the system's total energy changes over time.
+A simplified mechanical energy calculation includes:
+* Kinetic energy
+* Gravitational potential energy
+For a body:
+KE=12mv2KE = \frac{1}{2}mv^2KE=21​mv2
+For two bodies:
+PE=−Gm1m2rPE = -\frac{Gm_1m_2}{r}PE=−rGm1​m2​​
+In a closed, idealized system, total energy should remain approximately constant. Numerical integration can introduce small errors.
+What we should do
+We do not need to create a highly advanced physics engine. However, we can:
+* Track total energy at the beginning.
+* Track total energy during the simulation.
+* Display an approximate percentage drift.
+* Mention the integration method and limitations.
+For example:
+Energy drift: 0.8%
+Integrator: Velocity Verlet
+Only display these values if they are actually calculated by our code.
+11. Numerical Integration
+The simulation needs a method to update position and velocity over time.
+Possible approaches include:
+Euler integration
+* Easy to implement
+* Simple to understand
+* Can become unstable for orbital systems
+* May produce significant energy drift
+Semi-implicit Euler
+* Still simple
+* Often more stable than basic Euler
+* Useful for a fast prototype
+Velocity Verlet
+* Better suited to many physics simulations
+* Can provide improved energy behaviour
+* Slightly more complicated to implement
+Our strategy
+We should choose an integration method that is:
+1. Stable enough for our simulation.
+2. Easy to explain.
+3. Already tested.
+4. Not unnecessarily complicated for the deadline.
+We should not ask an AI tool to replace the entire physics engine repeatedly without first testing the existing implementation.
+12. Potential Project Features
+Depending on the idea we select, useful features could include:
+Core features
+* Interactive 2D or 3D star system
+* Star and planet rendering
+* Gravitational motion
+* Play/pause controls
+* Time-speed slider
+* Camera zoom
+* Object selection
+* Orbital trails
+Scientific features
+* Mass and radius information
+* Orbital distance
+* Orbital period
+* Velocity
+* Approximate habitable zone
+* Snow line
+* Energy drift
+* Physics explanation panel
+Creative features
+* Binary-star systems
+* Gravitational slingshot
+* Spacecraft navigation
+* Procedural planet generation
+* System stability experiments
+* Collision or close-encounter events
+* Planetary habitability indicators
+* Time-lapse orbital evolution
+We should select features based on time and reliability, not simply how impressive the feature sounds.
+13. Recommended Development Philosophy
+Build a Minimum Viable Product first
+The first version must have:
+* A working application
+* A visible star system
+* Objects moving under gravity
+* Basic controls
+* No major runtime errors
+* A clear README
+Only after this works should we add:
+* Advanced visuals
+* Scientific panels
+* Special effects
+* Additional interactions
+* More complex scenarios
+Development order
+Concept
+  ↓
+Basic simulation
+  ↓
+Correct gravitational motion
+  ↓
+User controls
+  ↓
+Visual polish
+  ↓
+Scientific explanation
+  ↓
+Testing
+  ↓
+GitHub and submission materials
+A simple working project is more valuable than an ambitious unfinished project.
+14. Antigravity + ChatGPT + Claude Workflow
+You said that you will use:
+* Google Antigravity
+* ChatGPT Premium
+* Claude, with limited quota
+We need to distribute tasks carefully.
+ChatGPT: Main planning and debugging assistant
+We can use ChatGPT for:
+* Project architecture
+* Breaking ideas into manageable features
+* Writing precise prompts
+* Reviewing generated code
+* Debugging errors
+* Explaining physics
+* Checking README content
+* Preparing the submission description
+* Planning testing and final presentation
+I will help you avoid unnecessary rewrites and identify which changes are actually important.
+Antigravity: Main implementation environment
+Use Antigravity primarily for:
+* Creating project files
+* Implementing features
+* Running the application
+* Testing in the development environment
+* Applying targeted code changes
+We should not repeatedly ask it to:
+* Rebuild the entire project
+* Change frameworks unnecessarily
+* Rewrite working code
+* Add several unrelated features at once
+* Make large changes without a checkpoint
+Claude: Limited, targeted second opinion
+Because Claude's quota is limited, use it only for specific tasks such as:
+* Reviewing a difficult algorithm
+* Finding a bug that remains unresolved
+* Reviewing the final user experience
+* Checking a complex physics implementation
+* Suggesting improvements when ChatGPT and Antigravity are stuck
+We should avoid spending Claude quota on:
+* Repeating project summaries
+* Generating boilerplate
+* Rewriting already-working code
+* Asking broad questions with unclear requirements
+15. Prompting Rules to Save Quota
+Every major prompt should contain:
+1. Current project state
+2. Exact problem
+3. Relevant file names
+4. Expected behaviour
+5. Constraints
+6. What must not be changed
+7. Required output
+Example prompt
+You are working on my existing star-system simulation.
+
+
+Goal:
+Fix the orbital instability in the current simulation.
+
+
+Constraints:
+- Do not rewrite the entire project.
+- Do not change the framework.
+- Preserve the current UI and controls.
+- Modify only the relevant physics files.
+- Explain the cause before making changes.
+
+
+First inspect the existing implementation.
+Then identify the smallest safe fix.
+Finally, tell me how to test whether the fix worked.
+This is much safer than:
+Make my simulation better and more realistic.
+16. Checkpoint System
+We should maintain clear checkpoints.
+Checkpoint 1 — Project runs
+* Application launches.
+* No build errors.
+* Basic scene is visible.
+Checkpoint 2 — Physics works
+* Bodies move.
+* Gravity is applied.
+* Positions and velocities update.
+* Motion is not obviously broken.
+Checkpoint 3 — Core interaction works
+* Pause/play.
+* Reset.
+* Time speed.
+* Object selection or camera control.
+Checkpoint 4 — Scientific features work
+* Orbital information.
+* Habitable zone or snow line if relevant.
+* Physics explanation.
+* Any calculated metrics.
+Checkpoint 5 — Presentation-ready
+* README completed.
+* Screenshot captured.
+* Video recorded.
+* GitHub repository is public.
+* Final submission details prepared.
+After each checkpoint, we should avoid making risky changes unless necessary.
+17. GitHub Requirements
+Judges may clone the public GitHub repository and run the project.
+Therefore, the repository must include:
+* Source code
+* README.md
+* Installation instructions
+* Run command
+* Dependencies
+* Project description
+* Physics explanation
+* Approximation details
+* Controls
+* Known limitations
+README should answer
+1. What is the project?
+2. What scientific concept does it demonstrate?
+3. How do I install it?
+4. How do I run it?
+5. What physics equations are used?
+6. What assumptions are made?
+7. What limitations exist?
+8. What technologies were used?
+We must test the README's run instructions ourselves before submission.
+18. Submission Requirements
+Based on the website information, we need to prepare:
+1. Project title
+A clear and memorable name.
+2. One-line description
+A concise explanation of what the project does.
+Example structure:
+An interactive gravitational simulation that allows users to explore the motion and stability of objects in a dynamic star system.
+This is only a format example; we will write the final description after selecting your project.
+3. Detailed description
+Should cover:
+* Concept
+* Physics
+* Main features
+* Approximations
+* Limitations
+* Technologies
+4. Public GitHub link
+The repository must be accessible to the judges.
+5. 30–60 second video
+The video should demonstrate:
+* The application running
+* The most interesting feature
+* User interaction
+* The scientific concept
+* A clear visual result
+We should not waste time creating a highly edited video. A clean, understandable demonstration is sufficient.
+6. Screenshot
+Choose a screenshot that shows:
+* The simulation
+* Important UI elements
+* Visual quality
+* The project's unique feature
+19. Important Competition Rules
+According to the website information you provided:
+* AI coding tools are allowed.
+* There is one entry per person.
+* The repository must be public.
+* The project should not be barely changed from a provided demo.
+* Edits are allowed until the deadline.
+* A rough version can be submitted early.
+* The README should contain clear run instructions.
+* The deadline is September 19, 2026, at 11:59 PM IST.
+We should keep evidence of our own modifications and ensure the project has a meaningful original concept.
+20. How We Should Choose Your Idea
+You mentioned that you have many ideas and will share them. We should evaluate each idea using these practical questions:
+Question
+	Why It Matters
+	Can we build the basic version within one day?
+	Prevents unfinished projects
+	Does gravity drive the main interaction?
+	Matches the competition theme
+	Can we explain the physics?
+	Supports scientific accuracy
+	Does it have one unique feature?
+	Supports creativity
+	Can it look good quickly?
+	Supports visual marks
+	Can we test it?
+	Reduces submission risk
+	Can it run reliably from GitHub?
+	Important for judging
+	We should prioritize one strong central idea rather than combining five incomplete concepts.
+21. Our Time Strategy
+Because only about one day remains, the practical priority should be:
+1. Choose one concept and define its minimum viable version.
+2. Build the core simulation before adding decoration.
+3. Test gravity, motion, reset, and controls.
+4. Add one or two scientifically meaningful features.
+5. Improve the visual appearance without changing the architecture.
+6. Prepare README, screenshot, and video.
+7. Push and test the public GitHub repository.
+8. Submit before the deadline rather than waiting for perfection.
+22. Our Collaboration Rules
+From now on, while working on this project:
+* You share your idea or current problem.
+* I help evaluate feasibility and create an implementation plan.
+* We write a carefully targeted prompt for Antigravity.
+* You run the changes and share the output or errors.
+* I help debug only what is necessary.
+* We preserve working features.
+* We keep track of what has already been implemented.
+* We do not spend limited AI quota on unnecessary experimentation.
+When you share code or errors, try to include:
+* The exact error message
+* The file name
+* The relevant code
+* What you expected
+* What actually happened
+* A screenshot if the issue is visual
+Final Guiding Principle
+Build a working gravitational experience first. Make it scientifically explainable, visually engaging, and clearly documented. Add creativity through one strong feature—not through unnecessary complexity.
