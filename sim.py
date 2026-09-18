@@ -1,16 +1,18 @@
 """
-STELLAR DISRUPTION — Phase 3: Scientific Impact Measurements
+STELLAR DISRUPTION
+A rogue star performs a close gravitational flyby through a planetary system.
+Real Newtonian N-body physics. Velocity Verlet integration. Astronomical units.
 
 Physics Setup:
 - Units: Astronomical Units (AU), Solar Masses (M_sun), Years (yr).
-- Gravitational Constant G = 4 * pi^2 ~ 39.47841760435743 AU^3 / (M_sun * yr^2).
+- Gravitational Constant G = 4*pi^2 ~ 39.478 AU^3 / (M_sun * yr^2).
 - Bodies:
   - Body 0: Fixed Host Star (1.0 M_sun) at origin (0, 0) AU.
-  - Body 1: Inner Planet (~1 Earth Mass) at r1 = 1.0 AU, initial v1 = 2*pi AU/yr.
-  - Body 2: Outer Planet (~3.3 Earth Masses) at r2 = 1.8 AU, initial v2 = sqrt(G * M_star / r2) AU/yr.
-  - Body 3: Rogue Star (0.6 M_sun) at initial pos (-4.5, -2.0) AU, velocity (3.2, 1.1) AU/yr.
-- Integrator: 2nd-order Symplectic Velocity Verlet scheme in Taichi kernel.
-- Softening: eps^2 = 1e-6 AU^2 (prevents zero-division singularity).
+  - Body 1: Inner Planet (~1 Earth Mass) at r1 = 1.0 AU.
+  - Body 2: Outer Planet (~3.3 Earth Masses) at r2 = 1.8 AU.
+  - Body 3: Rogue Star (0.6 M_sun) — hyperbolic flyby trajectory.
+- Integrator: 2nd-order Symplectic Velocity Verlet scheme.
+- Softening: eps^2 = 1e-6 AU^2 (prevents singularity at close approach).
 
 Controls:
 - SPACE : Pause / Resume simulation
@@ -302,7 +304,7 @@ def main():
 
     # Create Taichi GGUI Window
     win_width, win_height = 1280, 800
-    window = ti.ui.Window("STELLAR DISRUPTION — Phase 3: Scientific Impact Measurements",
+    window = ti.ui.Window("STELLAR DISRUPTION  |  Rogue Star Flyby Simulation",
                           res=(win_width, win_height),
                           vsync=True)
     canvas = window.get_canvas()
@@ -318,7 +320,9 @@ def main():
     sim_time = 0.0
 
     print("=" * 60, flush=True)
-    print("STELLAR DISRUPTION — Phase 3 MVP Launched", flush=True)
+    print("  STELLAR DISRUPTION", flush=True)
+    print("  Rogue Star Flyby Simulation", flush=True)
+    print("=" * 60, flush=True)
     print("Controls:", flush=True)
     print("  [SPACE] : Pause / Resume simulation", flush=True)
     print("  [S]     : Toggle Rogue Star (ACTIVE / DISABLED)", flush=True)
@@ -409,60 +413,77 @@ def main():
         # Dark cosmic background
         canvas.set_background_color((0.05, 0.05, 0.08))
 
-        # Render Orbit & Flyby Trails
-        canvas.lines(trail_line_vertices, width=0.0025, per_vertex_color=trail_line_colors)
+        # Render Orbit & Flyby Trails (slightly wider for readability)
+        canvas.lines(trail_line_vertices, width=0.003, per_vertex_color=trail_line_colors)
 
         # Render Bodies (Star, Planets & Rogue Star)
         canvas.circles(render_pos, radius=0.012, per_vertex_color=body_colors)
 
-        # --- GUI Overlay 1: Simulation Controls & Status ---
-        gui.begin("Simulation Controls & Status", 0.02, 0.02, 0.32, 0.32)
-        gui.text("Phase 3: Scientific Impact MVP")
-        gui.text("-----------------------------------")
-        gui.text(f"Status       : {'[PAUSED]' if paused else '[RUNNING]'}")
-        gui.text(f"Rogue Star   : {'[ACTIVE]' if rogue_enabled else '[DISABLED]'}")
-        gui.text(f"Sim Time     : {sim_time:.2f} years")
-        gui.text(f"Speed Multi  : {speed_scale:.2f}x")
+        # --- GUI Overlay 1: Title, Legend & Controls ---
+        gui.begin("STELLAR DISRUPTION", 0.02, 0.02, 0.30, 0.48)
+        gui.text("Rogue Star Flyby Simulation")
+        gui.text("Real Newtonian N-body gravity")
         gui.text("")
-        gui.text("Hotkeys:")
-        gui.text("  SPACE  : Pause / Resume")
-        gui.text("  S      : Toggle Rogue Star")
-        gui.text("  R      : Reset System")
-        gui.text("  UP/DN  : Speed +/-")
+        gui.text("--- LEGEND ---")
+        gui.text("  * Host Star  (Yellow)   1.0 Msun")
+        gui.text("  o Inner Planet (Cyan)   1.0 AU")
+        gui.text("  o Outer Planet (Coral)  1.8 AU")
+        gui.text("  * Rogue Star  (Red)     0.6 Msun")
+        gui.text("")
+        gui.text("--- STATUS ---")
+        gui.text(f"  Simulation : {'PAUSED' if paused else 'RUNNING'}")
+        gui.text(f"  Rogue Star : {'ACTIVE' if rogue_enabled else 'DISABLED'}")
+        gui.text(f"  Time       : {sim_time:.2f} yr")
+        gui.text(f"  Speed      : {speed_scale:.2f}x")
+        gui.text("")
+        gui.text("--- CONTROLS ---")
+        gui.text("  SPACE  Pause / Resume")
+        gui.text("  S      Toggle Rogue Star")
+        gui.text("  R      Reset System")
+        gui.text("  UP/DN  Speed +/-")
         gui.end()
 
         # --- GUI Overlay 2: Scientific Impact Measurements ---
-        gui.begin("Scientific Impact Measurements", 0.60, 0.02, 0.38, 0.52)
-        gui.text("Real-Time Gravitational Metrics")
-        gui.text("-------------------------------------")
-        gui.text("Planet 1 (Inner - Cyan):")
-        gui.text(f"  Distance : {r1:.3f} AU  (Init: {r0_1:.2f} AU)")
-        gui.text(f"  Speed    : {v1:.3f} AU/yr")
-        gui.text(f"  Energy Δ : {dE1:+.1f}%")
-        gui.text(f"  Status   : {status1}")
+        gui.begin("Scientific Impact Measurements", 0.62, 0.02, 0.36, 0.58)
+        gui.text("Gravitational Orbital Analysis")
+        gui.text("(E = 0.5*v^2 - G*M_star/r)")
         gui.text("")
-        gui.text("Planet 2 (Outer - Coral):")
-        gui.text(f"  Distance : {r2:.3f} AU  (Init: {r0_2:.2f} AU)")
-        gui.text(f"  Speed    : {v2:.3f} AU/yr")
-        gui.text(f"  Energy Δ : {dE2:+.1f}%")
-        gui.text(f"  Status   : {status2}")
+        gui.text("--- PLANET 1  (Inner / Cyan) ---")
+        gui.text(f"  Dist from star : {r1:.3f} AU  (init {r0_1:.2f})")
+        gui.text(f"  Orbital speed  : {v1:.3f} AU/yr")
+        gui.text(f"  Spec. energy   : {E1:+.2f} AU2/yr2")
+        gui.text(f"  Energy change  : {dE1:+.1f}%  vs baseline")
+        gui.text(f"  Status         : {status1}")
         gui.text("")
-        gui.text("Encounter Data:")
+        gui.text("--- PLANET 2  (Outer / Coral) ---")
+        gui.text(f"  Dist from star : {r2:.3f} AU  (init {r0_2:.2f})")
+        gui.text(f"  Orbital speed  : {v2:.3f} AU/yr")
+        gui.text(f"  Spec. energy   : {E2:+.2f} AU2/yr2")
+        gui.text(f"  Energy change  : {dE2:+.1f}%  vs baseline")
+        gui.text(f"  Status         : {status2}")
+        gui.text("")
+        gui.text("--- ENCOUNTER ---")
         if rogue_enabled:
-            gui.text(f"  Rogue Star Dist: {d_rogue:.3f} AU")
+            gui.text(f"  Rogue dist now : {d_rogue:.3f} AU")
             if min_rogue_dist < 999.0:
-                gui.text(f"  Min Periastron : {min_rogue_dist:.3f} AU")
+                gui.text(f"  Closest pass   : {min_rogue_dist:.3f} AU")
             else:
-                gui.text("  Min Periastron : N/A")
-            
+                gui.text("  Closest pass   : not yet")
             if encounter_in_progress:
-                gui.text("  Encounter Phase: FLYBY IN PROGRESS")
+                gui.text("  Phase : FLYBY IN PROGRESS")
             elif post_encounter:
-                gui.text("  Encounter Phase: POST-ENCOUNTER (Final E)")
+                gui.text("  Phase : POST-ENCOUNTER  (final E)")
             else:
-                gui.text("  Encounter Phase: APPROACHING")
+                gui.text("  Phase : APPROACHING")
         else:
-            gui.text("  Rogue Star     : DISABLED")
+            gui.text("  Rogue Star is DISABLED")
+            gui.text("  Press S to activate flyby")
+        gui.text("")
+        gui.text("--- ENERGY GUIDE ---")
+        gui.text("  E < 0  =>  BOUND orbit")
+        gui.text("  E >= 0 =>  POTENTIALLY UNBOUND")
+        gui.text("  (3-body encounter can")
+        gui.text("   temporarily raise E)")
         gui.end()
 
         window.show()
