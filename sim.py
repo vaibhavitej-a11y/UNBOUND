@@ -518,6 +518,8 @@ def setup_initial_conditions():
     body_colors[3] = [0.78, 0.84, 1.0]
     render_radius[3] = 0.0115
 
+    reset_to_initial()
+
 
 # -----------------------------------------------------------------------------
 # 6. Main Execution & Interactive Loop
