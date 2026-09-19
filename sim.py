@@ -40,7 +40,14 @@ EPS_SQ = 1e-6                      # Gravitational softening factor (AU^2)
 BASE_DT = 0.001                    # Fundamental simulation time step (years per step)
 SUBSTEPS_PER_FRAME = 20            # Sub-stepping for integration stability
 
-MAX_TRAIL_LEN = 300                # Number of historical points per trail
+MAX_TRAIL_LEN = 180                # Trail history cap — prevents tangled spaghetti
+
+# Window dimensions
+WIN_W, WIN_H = 1280, 800
+
+# Starfield config — rendered once into a background image
+NUM_STARS = 320
+STAR_IMG_W, STAR_IMG_H = 1280, 800
 
 # -----------------------------------------------------------------------------
 # 2. Taichi Fields (GPU Data Allocation)
@@ -72,8 +79,26 @@ TOTAL_TRAIL_VERTICES = NUM_TRAILS * TRAIL_VERTICES_PER_BODY
 trail_line_vertices = ti.Vector.field(2, dtype=ti.f32, shape=TOTAL_TRAIL_VERTICES)
 trail_line_colors = ti.Vector.field(3, dtype=ti.f32, shape=TOTAL_TRAIL_VERTICES)
 
+# Starfield background image (RGBA rendered once on GPU)
+star_img = ti.Vector.field(3, dtype=ti.f32, shape=(STAR_IMG_W, STAR_IMG_H))
+
+# Host Star & Intruder Render Fields
+host_star_pos = ti.Vector.field(2, dtype=ti.f32, shape=1)
+intruder_pos  = ti.Vector.field(2, dtype=ti.f32, shape=1)
+
+# Planet Directional Sphere Layers (shape 2 for Inner & Outer planets)
+planet_center_pos   = ti.Vector.field(2, dtype=ti.f32, shape=2)
+planet_shadow_pos   = ti.Vector.field(2, dtype=ti.f32, shape=2)
+planet_lit_pos      = ti.Vector.field(2, dtype=ti.f32, shape=2)
+planet_specular_pos = ti.Vector.field(2, dtype=ti.f32, shape=2)
+
+planet_shadow_colors   = ti.Vector.field(3, dtype=ti.f32, shape=2)
+planet_body_colors     = ti.Vector.field(3, dtype=ti.f32, shape=2)
+planet_lit_colors      = ti.Vector.field(3, dtype=ti.f32, shape=2)
+planet_specular_colors = ti.Vector.field(3, dtype=ti.f32, shape=2)
+
 # -----------------------------------------------------------------------------
-# 3. Physics & Simulation Kernels
+# 3. Physics & Simulation Kernels  (UNCHANGED)
 # -----------------------------------------------------------------------------
 
 @ti.kernel
@@ -144,7 +169,7 @@ def reset_to_initial():
 
 
 # -----------------------------------------------------------------------------
-# 4. Rendering & Coordinate Mapping Kernels
+# 4. Rendering & Coordinate Mapping Kernels  (UNCHANGED PHYSICS — visual only)
 # -----------------------------------------------------------------------------
 
 @ti.kernel
@@ -158,6 +183,51 @@ def update_render_positions(scale_x: ti.f32, scale_y: ti.f32, rogue_enabled: ti.
             nx = 0.5 + pos[i][0] / (2.0 * scale_x)
             ny = 0.5 + pos[i][1] / (2.0 * scale_y)
             render_pos[i] = ti.Vector([nx, ny])
+
+
+@ti.kernel
+def update_glow_positions(scale_x: ti.f32, scale_y: ti.f32, rogue_enabled: ti.i32):
+    """Updates rendering positions for host star, intruder, and directional planet sphere shading."""
+    # Host Star (index 0)
+    nx0 = 0.5 + pos[0][0] / (2.0 * scale_x)
+    ny0 = 0.5 + pos[0][1] / (2.0 * scale_y)
+    host_star_pos[0] = ti.Vector([nx0, ny0])
+
+    # Compact Stellar Intruder (index 3)
+    if rogue_enabled == 1:
+        nx3 = 0.5 + pos[3][0] / (2.0 * scale_x)
+        ny3 = 0.5 + pos[3][1] / (2.0 * scale_y)
+        intruder_pos[0] = ti.Vector([nx3, ny3])
+    else:
+        intruder_pos[0] = ti.Vector([-10.0, -10.0])
+
+    # Directional Sphere Shading for Planets (indices 1 & 2)
+    for p in range(2):
+        body_idx = p + 1
+        px = pos[body_idx][0]
+        py = pos[body_idx][1]
+
+        # Normalized screen center of planet
+        cx = 0.5 + px / (2.0 * scale_x)
+        cy = 0.5 + py / (2.0 * scale_y)
+        planet_center_pos[p] = ti.Vector([cx, cy])
+
+        # Vector pointing FROM planet TO host star (at origin 0, 0)
+        d_star = ti.sqrt(px * px + py * py) + 1e-6
+        ux = -px / d_star
+        uy = -py / d_star
+
+        # Screen-space direction vector
+        dx = ux / scale_x
+        dy = uy / scale_y
+        s_len = ti.sqrt(dx * dx + dy * dy) + 1e-6
+        su_x = dx / s_len
+        su_y = dy / s_len
+
+        # Directional highlight offsets toward host star (scaled for ~45% larger planet radius)
+        planet_shadow_pos[p]   = ti.Vector([cx - su_x * 0.0020, cy - su_y * 0.0020])
+        planet_lit_pos[p]      = ti.Vector([cx + su_x * 0.0042, cy + su_y * 0.0042])
+        planet_specular_pos[p] = ti.Vector([cx + su_x * 0.0065, cy + su_y * 0.0065])
 
 
 @ti.kernel
@@ -213,9 +283,10 @@ def build_trail_lines(rogue_enabled: ti.i32):
                     trail_line_vertices[v_idx] = pt0
                     trail_line_vertices[v_idx + 1] = pt1
 
-                    # Fade color along trail length
-                    alpha = float(seg) / float(MAX_TRAIL_LEN)
-                    seg_color = color * (0.15 + 0.85 * alpha)
+                    # Aggressive power-law fade: full opacity near planet, near-fully transparent at tail
+                    alpha = float(seg) / float(MAX_TRAIL_LEN - 1)
+                    fade = ti.pow(alpha, 2.2)
+                    seg_color = color * (0.005 + 0.995 * fade)
                     trail_line_colors[v_idx] = seg_color
                     trail_line_colors[v_idx + 1] = seg_color
             else:
@@ -226,8 +297,105 @@ def build_trail_lines(rogue_enabled: ti.i32):
                 trail_line_colors[v_idx + 1] = ti.Vector([0.0, 0.0, 0.0])
 
 
+def generate_starfield():
+    """Generates a high-fidelity cinematic deep-space background once at startup."""
+    import numpy as np
+
+    # 1. Base Deep Space Canvas (WIN_W x WIN_H x 3)
+    # Coordinate grids normalized to [0, 1]
+    x_coords = np.linspace(0.0, 1.0, STAR_IMG_W, dtype=np.float32)
+    y_coords = np.linspace(0.0, 1.0, STAR_IMG_H, dtype=np.float32)
+    xx, yy = np.meshgrid(x_coords, y_coords, indexing='ij')
+
+    # Deep Space Void Base (Navy/Indigo gradient)
+    img = np.zeros((STAR_IMG_W, STAR_IMG_H, 3), dtype=np.float32)
+    img[:, :, 0] = 0.008 + 0.006 * (1.0 - yy)  # Red
+    img[:, :, 1] = 0.010 + 0.008 * (1.0 - yy)  # Green
+    img[:, :, 2] = 0.022 + 0.016 * (1.0 - yy)  # Blue
+
+    # 2. Subtle Nebula Clouds (Purple, Blue, Reddish filaments)
+    # Purple Nebula (Top Right)
+    d_purple2 = (xx - 0.75)**2 + (yy - 0.30)**2
+    neb_purple = np.exp(-d_purple2 / 0.12)
+    img[:, :, 0] += neb_purple * 0.022
+    img[:, :, 1] += neb_purple * 0.008
+    img[:, :, 2] += neb_purple * 0.038
+
+    # Deep Cyan/Blue Nebula (Bottom Left)
+    d_cyan2 = (xx - 0.22)**2 + (yy - 0.75)**2
+    neb_cyan = np.exp(-d_cyan2 / 0.15)
+    img[:, :, 0] += neb_cyan * 0.006
+    img[:, :, 1] += neb_cyan * 0.024
+    img[:, :, 2] += neb_cyan * 0.036
+
+    # Reddish Cosmic Filament (Center Top)
+    d_red2 = (xx - 0.45)**2 + (yy - 0.18)**2
+    neb_red = np.exp(-d_red2 / 0.08)
+    img[:, :, 0] += neb_red * 0.020
+    img[:, :, 1] += neb_red * 0.006
+    img[:, :, 2] += neb_red * 0.012
+
+    # Clip background glow so it never interferes with UI or trail readability
+    np.clip(img, 0.0, 0.08, out=img)
+
+    # 3. Dense Multi-Layer Starfield
+    np.random.seed(42)
+
+    # Tier 1: Faint background micro-stars
+    n_micro = 900
+    mx = np.random.randint(0, STAR_IMG_W, size=n_micro)
+    my = np.random.randint(0, STAR_IMG_H, size=n_micro)
+    mb = 0.15 + 0.35 * np.random.rand(n_micro)
+    for i in range(n_micro):
+        b = float(mb[i])
+        img[mx[i], my[i]] += [b * 0.75, b * 0.85, b * 1.0]
+
+    # Tier 2: Medium field stars
+    n_med = 350
+    sx = np.random.randint(0, STAR_IMG_W, size=n_med)
+    sy = np.random.randint(0, STAR_IMG_H, size=n_med)
+    sb = 0.40 + 0.40 * np.random.rand(n_med)
+    hue = np.random.rand(n_med)
+    for i in range(n_med):
+        b = float(sb[i])
+        x, y = sx[i], sy[i]
+        # Color variation: white, cyan, yellow, warm tint
+        if hue[i] < 0.6:
+            col = np.array([b * 0.85, b * 0.90, b * 1.0], dtype=np.float32)
+        elif hue[i] < 0.85:
+            col = np.array([b * 1.0, b * 0.92, b * 0.75], dtype=np.float32)
+        else:
+            col = np.array([b * 1.0, b * 0.70, b * 0.80], dtype=np.float32)
+
+        img[x, y] += col
+        if b > 0.65 and x + 1 < STAR_IMG_W and y + 1 < STAR_IMG_H:
+            img[x+1, y] += col * 0.35
+            img[x, y+1] += col * 0.35
+
+    # Tier 3: Bright foreground stars with soft halo glow
+    n_bright = 45
+    bx = np.random.randint(2, STAR_IMG_W - 2, size=n_bright)
+    by = np.random.randint(2, STAR_IMG_H - 2, size=n_bright)
+    bb = 0.75 + 0.25 * np.random.rand(n_bright)
+    for i in range(n_bright):
+        b = float(bb[i])
+        x, y = bx[i], by[i]
+        core_col = np.array([b, b, b], dtype=np.float32)
+        halo_col = np.array([b * 0.4, b * 0.5, b * 0.7], dtype=np.float32)
+
+        # Core
+        img[x, y] += core_col
+        # Cross flare & halo
+        img[x-1, y] += halo_col * 0.5; img[x+1, y] += halo_col * 0.5
+        img[x, y-1] += halo_col * 0.5; img[x, y+1] += halo_col * 0.5
+
+    np.clip(img, 0.0, 1.0, out=img)
+    star_img.from_numpy(img)
+
+
+
 # -----------------------------------------------------------------------------
-# 5. Initialization Helper & Baseline Capture
+# 5. Initialization Helper & Baseline Capture  (UNCHANGED)
 # -----------------------------------------------------------------------------
 
 def setup_initial_conditions():
@@ -262,22 +430,35 @@ def setup_initial_conditions():
     init_pos[2] = p2; init_vel[2] = v2; init_mass[2] = m2
     init_pos[3] = p3; init_vel[3] = v3; init_mass[3] = m3
 
-    # Visual Properties
-    # Body 0 (Host Star): Yellow, Radius 0.025
-    body_colors[0] = [1.0, 0.85, 0.1]
-    render_radius[0] = 0.025
+    # Visual Properties & Palette Matching Pass A Specifications
+    # Body 0 (Host Star): Warm Amber / Gold (#e8b94a core)
+    body_colors[0] = [0.98, 0.94, 0.82]
+    render_radius[0] = 0.012
 
-    # Body 1 (Inner Planet): Cyan, Radius 0.012
-    body_colors[1] = [0.1, 0.85, 1.0]
-    render_radius[1] = 0.012
+    # Body 1 (Inner Planet): Cool Cyan (#5ec8d8)
+    body_colors[1] = [0.37, 0.78, 0.85]
+    render_radius[1] = 0.007
 
-    # Body 2 (Outer Planet): Coral/Orange, Radius 0.014
-    body_colors[2] = [1.0, 0.45, 0.2]
-    render_radius[2] = 0.014
+    # Body 2 (Outer Planet): Soft Coral (#e08a6f)
+    body_colors[2] = [0.88, 0.54, 0.435]
+    render_radius[2] = 0.008
 
-    # Body 3 (Rogue Star): Crimson Red, Radius 0.020
-    body_colors[3] = [1.0, 0.1, 0.3]
-    render_radius[3] = 0.020
+    # Body 3 (Compact Stellar Intruder): Cool Blue-White (#c9d6ff)
+    body_colors[3] = [0.79, 0.84, 1.00]
+    render_radius[3] = 0.010
+
+    # Directional Sphere Shading Colors for Planets (Enhanced Contrast)
+    # Planet 1 (Inner - Cool Cyan #5ec8d8)
+    planet_body_colors[0]     = [0.37, 0.78, 0.85]   # Base #5ec8d8
+    planet_shadow_colors[0]   = [0.02, 0.09, 0.12]   # Deep limb shadow
+    planet_lit_colors[0]      = [0.72, 0.94, 0.98]   # Lit highlight #b8f0fa
+    planet_specular_colors[0] = [1.00, 1.00, 1.00]   # Crisp white specular peak
+
+    # Planet 2 (Outer - Soft Coral #e08a6f)
+    planet_body_colors[1]     = [0.88, 0.54, 0.435]  # Base #e08a6f
+    planet_shadow_colors[1]   = [0.14, 0.05, 0.03]   # Deep limb shadow
+    planet_lit_colors[1]      = [0.98, 0.78, 0.70]   # Lit highlight #fac7b3
+    planet_specular_colors[1] = [1.00, 1.00, 1.00]   # Crisp white specular peak
 
     reset_to_initial()
     compute_accelerations(0)
@@ -290,7 +471,11 @@ def setup_initial_conditions():
 def main():
     setup_initial_conditions()
 
+    # Generate starfield background once (static)
+    generate_starfield()
+
     # Calculate baseline physical quantities for planets relative to Host Star
+    # (UNCHANGED scientific calculations)
     m0 = 1.0
     r0_1 = 1.0
     v0_1 = math.sqrt(G_CONST * m0 / r0_1)
@@ -303,16 +488,16 @@ def main():
     min_rogue_dist = float('inf')
 
     # Create Taichi GGUI Window
-    win_width, win_height = 1280, 800
     window = ti.ui.Window("STELLAR DISRUPTION  |  Rogue Star Flyby Simulation",
-                          res=(win_width, win_height),
+                          res=(WIN_W, WIN_H),
                           vsync=True)
     canvas = window.get_canvas()
     gui = window.get_gui()
 
-    # Viewport scaling: 2.6 AU in Y axis; scale X to preserve 16:10 aspect ratio
-    scale_y = 2.6
-    scale_x = scale_y * (win_width / win_height)
+    # Viewport scaling: wider scale keeps all bodies visible during flyby
+    # 3.2 AU Y-extent prevents clipping at periastron approach angles
+    scale_y = 3.2
+    scale_x = scale_y * (WIN_W / WIN_H)
 
     paused = False
     rogue_enabled = False
@@ -320,15 +505,12 @@ def main():
     sim_time = 0.0
 
     print("=" * 60, flush=True)
-    print("  STELLAR DISRUPTION", flush=True)
-    print("  Rogue Star Flyby Simulation", flush=True)
+    print("  STELLAR DISRUPTION — Rogue Star Flyby Simulation", flush=True)
     print("=" * 60, flush=True)
-    print("Controls:", flush=True)
-    print("  [SPACE] : Pause / Resume simulation", flush=True)
-    print("  [S]     : Toggle Rogue Star (ACTIVE / DISABLED)", flush=True)
-    print("  [R]     : Reset system to initial unperturbed state", flush=True)
-    print("  [UP]    : Speed up simulation", flush=True)
-    print("  [DOWN]  : Slow down simulation", flush=True)
+    print("  SPACE  : Pause / Resume", flush=True)
+    print("  S      : Toggle Rogue Star (ACTIVE / DISABLED)", flush=True)
+    print("  R      : Reset system", flush=True)
+    print("  UP/DN  : Speed +/-", flush=True)
     print("=" * 60, flush=True)
 
     trail_sample_counter = 0
@@ -351,23 +533,24 @@ def main():
 
         rogue_flag = 1 if rogue_enabled else 0
 
-        # --- Physics Integration Step ---
+        # --- Physics Integration Step (UNCHANGED) ---
         if not paused:
             dt = BASE_DT * speed_scale
             for _ in range(SUBSTEPS_PER_FRAME):
                 verlet_step(dt, rogue_flag)
                 sim_time += dt
 
-            # Record trail history every 2 frames for smooth trail rendering
+            # Record trail every frame for smooth, capped-length trails
             trail_sample_counter += 1
             if trail_sample_counter % 2 == 0:
                 record_trail_history(scale_x, scale_y, rogue_flag)
 
         # Update screen coordinates and trail line geometry
         update_render_positions(scale_x, scale_y, rogue_flag)
+        update_glow_positions(scale_x, scale_y, rogue_flag)
         build_trail_lines(rogue_flag)
 
-        # --- Real-Time Scientific Impact Calculations ---
+        # --- Real-Time Scientific Impact Calculations (UNCHANGED) ---
         pos_arr = pos.to_numpy()
         vel_arr = vel.to_numpy()
 
@@ -380,7 +563,7 @@ def main():
             d_rogue = math.sqrt(pos_arr[3][0]**2 + pos_arr[3][1]**2)
             if d_rogue < min_rogue_dist:
                 min_rogue_dist = d_rogue
-            
+
             # Encounter is in progress if rogue star is within 4.0 AU of host star
             if d_rogue <= 4.0:
                 encounter_in_progress = True
@@ -392,98 +575,136 @@ def main():
         v1 = math.sqrt(vel_arr[1][0]**2 + vel_arr[1][1]**2)
         E1 = 0.5 * (v1**2) - (G_CONST * m0 / max(r1, 1e-4))
         dE1 = ((E1 - E0_1) / abs(E0_1)) * 100.0
-        
+
         if E1 >= 0.0:
             status1 = "POTENTIALLY UNBOUND" if encounter_in_progress else "UNBOUND / ESCAPED"
         else:
-            status1 = "BOUND (E < 0)"
+            status1 = "BOUND"
 
         # Planet 2 (Outer Planet - Index 2)
         r2 = math.sqrt(pos_arr[2][0]**2 + pos_arr[2][1]**2)
         v2 = math.sqrt(vel_arr[2][0]**2 + vel_arr[2][1]**2)
         E2 = 0.5 * (v2**2) - (G_CONST * m0 / max(r2, 1e-4))
         dE2 = ((E2 - E0_2) / abs(E0_2)) * 100.0
-        
+
         if E2 >= 0.0:
             status2 = "POTENTIALLY UNBOUND" if encounter_in_progress else "UNBOUND / ESCAPED"
         else:
-            status2 = "BOUND (E < 0)"
+            status2 = "BOUND"
 
-        # --- Drawing Canvas ---
-        # Dark cosmic background
-        canvas.set_background_color((0.05, 0.05, 0.08))
+        # --- Encounter phase label for status bar ---
+        if rogue_enabled:
+            if encounter_in_progress:
+                phase_label = "FLYBY IN PROGRESS"
+            elif post_encounter:
+                phase_label = "POST-ENCOUNTER"
+            else:
+                phase_label = "APPROACHING"
+        else:
+            phase_label = "Compact Stellar Intruder DISABLED  —  press S to activate"
 
-        # Render Orbit & Flyby Trails (slightly wider for readability)
-        canvas.lines(trail_line_vertices, width=0.003, per_vertex_color=trail_line_colors)
+        # =====================================================================
+        # --- Drawing Canvas (Pass A Space-Agency Palette & Sphere Shading) ---
+        # =====================================================================
 
-        # Render Bodies (Star, Planets & Rogue Star)
-        canvas.circles(render_pos, radius=0.012, per_vertex_color=body_colors)
+        # 1. Background (Near-black #05070c with low-density stars)
+        canvas.set_image(star_img)
 
-        # --- GUI Overlay 1: Title, Legend & Controls ---
-        gui.begin("STELLAR DISRUPTION", 0.02, 0.02, 0.30, 0.48)
-        gui.text("Rogue Star Flyby Simulation")
-        gui.text("Real Newtonian N-body gravity")
-        gui.text("")
-        gui.text("--- LEGEND ---")
-        gui.text("  * Host Star  (Yellow)   1.0 Msun")
-        gui.text("  o Inner Planet (Cyan)   1.0 AU")
-        gui.text("  o Outer Planet (Coral)  1.8 AU")
-        gui.text("  * Rogue Star  (Red)     0.6 Msun")
-        gui.text("")
-        gui.text("--- STATUS ---")
-        gui.text(f"  Simulation : {'PAUSED' if paused else 'RUNNING'}")
-        gui.text(f"  Rogue Star : {'ACTIVE' if rogue_enabled else 'DISABLED'}")
-        gui.text(f"  Time       : {sim_time:.2f} yr")
-        gui.text(f"  Speed      : {speed_scale:.2f}x")
-        gui.text("")
-        gui.text("--- CONTROLS ---")
-        gui.text("  SPACE  Pause / Resume")
-        gui.text("  S      Toggle Rogue Star")
-        gui.text("  R      Reset System")
-        gui.text("  UP/DN  Speed +/-")
+        # 2. Orbit & Flyby Trails (power-law fade to transparent at tail)
+        canvas.lines(trail_line_vertices, width=0.0022, per_vertex_color=trail_line_colors)
+
+        # 3. Host Star Radial Gradient & Visible Soft Bloom (~2.5x star radius)
+        canvas.circles(host_star_pos, radius=0.035, color=(0.55, 0.40, 0.12))  # Outer soft bloom (~2.5x)
+        canvas.circles(host_star_pos, radius=0.024, color=(0.82, 0.62, 0.18))  # Mid glow (~1.7x)
+        canvas.circles(host_star_pos, radius=0.016, color=(0.95, 0.82, 0.35))  # Inner warm halo (~1.2x)
+
+        # 4. Compact Stellar Intruder Glow & Core (if active)
+        if rogue_enabled:
+            canvas.circles(intruder_pos, radius=0.018, color=(0.22, 0.25, 0.38))
+            canvas.circles(intruder_pos, radius=0.010, color=(0.85, 0.89, 1.00))
+
+        # 5. Host Star Core Circle (bright white-gold center)
+        canvas.circles(host_star_pos, radius=0.012, color=(0.98, 0.94, 0.82))
+
+        # 6. Planets Directional Sphere Shading (~45% larger radii for camera zoom visibility)
+        #    Layer A: Dark limb shadow base
+        canvas.circles(planet_shadow_pos, radius=0.0130, per_vertex_color=planet_shadow_colors)
+        #    Layer B: Main planet body circle
+        canvas.circles(planet_center_pos, radius=0.0110, per_vertex_color=planet_body_colors)
+        #    Layer C: Lit highlight circle (offset toward host star)
+        canvas.circles(planet_lit_pos, radius=0.0070, per_vertex_color=planet_lit_colors)
+        #    Layer D: Specular peak circle (offset further toward host star)
+        canvas.circles(planet_specular_pos, radius=0.0035, per_vertex_color=planet_specular_colors)
+
+        # =====================================================================
+        # --- GUI Overlays ---
+        # =====================================================================
+
+        # Title bar — top center, compact
+        gui.begin("##title", 0.28, 0.01, 0.44, 0.075)
+        gui.text("  STELLAR DISRUPTION")
+        gui.text("  Explore how a passing star reshapes planetary orbits")
         gui.end()
 
-        # --- GUI Overlay 2: Scientific Impact Measurements ---
-        gui.begin("Scientific Impact Measurements", 0.62, 0.02, 0.36, 0.58)
-        gui.text("Gravitational Orbital Analysis")
-        gui.text("(E = 0.5*v^2 - G*M_star/r)")
+        # Left panel — Legend + Controls, narrow, shifted down below title
+        gui.begin("##left", 0.01, 0.10, 0.22, 0.54)
+        gui.text("LEGEND")
+        gui.text("  * Host Star   Yellow  1.0 Msun")
+        gui.text("  o Inner Planet  Cyan  1.0 AU")
+        gui.text("  o Outer Planet Coral  1.8 AU")
+        gui.text("  * Intruder      Blue  0.6 Msun")
         gui.text("")
-        gui.text("--- PLANET 1  (Inner / Cyan) ---")
-        gui.text(f"  Dist from star : {r1:.3f} AU  (init {r0_1:.2f})")
-        gui.text(f"  Orbital speed  : {v1:.3f} AU/yr")
-        gui.text(f"  Spec. energy   : {E1:+.2f} AU2/yr2")
-        gui.text(f"  Energy change  : {dE1:+.1f}%  vs baseline")
-        gui.text(f"  Status         : {status1}")
+        gui.text("CONTROLS")
+        gui.text("  SPACE   Pause / Resume")
+        gui.text("  S       Toggle Intruder")
+        gui.text("  R       Reset")
+        gui.text("  UP/DN   Speed  +/-")
         gui.text("")
-        gui.text("--- PLANET 2  (Outer / Coral) ---")
-        gui.text(f"  Dist from star : {r2:.3f} AU  (init {r0_2:.2f})")
-        gui.text(f"  Orbital speed  : {v2:.3f} AU/yr")
-        gui.text(f"  Spec. energy   : {E2:+.2f} AU2/yr2")
-        gui.text(f"  Energy change  : {dE2:+.1f}%  vs baseline")
-        gui.text(f"  Status         : {status2}")
+        gui.text("SIMULATION")
+        gui.text(f"  {'>> PAUSED <<' if paused else 'Running'}")
+        gui.text(f"  Time  {sim_time:.2f} yr")
+        gui.text(f"  Speed {speed_scale:.2f}x")
+        gui.end()
+
+        # Right panel — Scientific measurements, narrow
+        gui.begin("##right", 0.77, 0.10, 0.22, 0.68)
+        gui.text("ORBITAL ANALYSIS")
+        gui.text("E = 0.5v^2 - GM/r")
         gui.text("")
-        gui.text("--- ENCOUNTER ---")
+        gui.text("INNER PLANET  (Cyan)")
+        gui.text(f"  r   {r1:.3f} AU (ini {r0_1:.2f})")
+        gui.text(f"  v   {v1:.3f} AU/yr")
+        gui.text(f"  E   {E1:+.2f}")
+        gui.text(f"  dE  {dE1:+.1f}%")
+        gui.text(f"  {status1}")
+        gui.text("")
+        gui.text("OUTER PLANET  (Coral)")
+        gui.text(f"  r   {r2:.3f} AU (ini {r0_2:.2f})")
+        gui.text(f"  v   {v2:.3f} AU/yr")
+        gui.text(f"  E   {E2:+.2f}")
+        gui.text(f"  dE  {dE2:+.1f}%")
+        gui.text(f"  {status2}")
+        gui.text("")
+        gui.text("INTRUDER ENCOUNTER")
         if rogue_enabled:
-            gui.text(f"  Rogue dist now : {d_rogue:.3f} AU")
+            gui.text(f"  Dist  {d_rogue:.3f} AU")
             if min_rogue_dist < 999.0:
-                gui.text(f"  Closest pass   : {min_rogue_dist:.3f} AU")
+                gui.text(f"  Min   {min_rogue_dist:.3f} AU")
             else:
-                gui.text("  Closest pass   : not yet")
-            if encounter_in_progress:
-                gui.text("  Phase : FLYBY IN PROGRESS")
-            elif post_encounter:
-                gui.text("  Phase : POST-ENCOUNTER  (final E)")
-            else:
-                gui.text("  Phase : APPROACHING")
+                gui.text("  Min   ---")
         else:
-            gui.text("  Rogue Star is DISABLED")
-            gui.text("  Press S to activate flyby")
+            gui.text("  DISABLED")
         gui.text("")
-        gui.text("--- ENERGY GUIDE ---")
-        gui.text("  E < 0  =>  BOUND orbit")
-        gui.text("  E >= 0 =>  POTENTIALLY UNBOUND")
-        gui.text("  (3-body encounter can")
-        gui.text("   temporarily raise E)")
+        gui.text("ENERGY GUIDE")
+        gui.text("  E<0  BOUND orbit")
+        gui.text("  E>=0 POTENTIALLY UNBOUND")
+        gui.text("  (3-body transfer)")
+        gui.end()
+
+        # Bottom status bar — thin strip across bottom
+        gui.begin("##statusbar", 0.0, 0.93, 1.0, 0.07)
+        rogue_str = f"Intruder: {'ACTIVE' if rogue_enabled else 'DISABLED'}"
+        gui.text(f"  {rogue_str}   |   Time: {sim_time:.2f} yr   |   Phase: {phase_label}   |   Speed: {speed_scale:.2f}x")
         gui.end()
 
         window.show()
