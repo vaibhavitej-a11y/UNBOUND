@@ -39,7 +39,6 @@ G_CONST = 4.0 * math.pi * math.pi  # AU^3 / (M_sun * yr^2)
 EPS_SQ = 1e-6                      # Gravitational softening factor (AU^2)
 BASE_DT = 0.001                    # Fundamental simulation time step (years per step)
 SUBSTEPS_PER_FRAME = 20            # Sub-stepping for integration stability
-
 MAX_TRAIL_LEN = 180                # Trail history cap — prevents tangled spaghetti
 
 # Window dimensions
@@ -380,52 +379,24 @@ def generate_starfield():
     # 1. Base Deep Space Canvas (WIN_W x WIN_H x 3)
     img = np.zeros((STAR_IMG_W, STAR_IMG_H, 3), dtype=np.float32)
 
-    # Base background: near-black #05070c -> RGB [0.016, 0.022, 0.040]
+    # Base background: near-black #05070c -> RGB [0.020, 0.027, 0.047]
     for py in range(STAR_IMG_H):
         t = py / float(STAR_IMG_H)
         img[:, py, 0] = 0.016 + 0.005 * (1.0 - t)  # Red
         img[:, py, 1] = 0.022 + 0.006 * (1.0 - t)  # Green
         img[:, py, 2] = 0.040 + 0.010 * (1.0 - t)  # Blue
 
-    # 2. Restored Space-Agency Low-Density Starfield (750 stars, 1x1 to 3x3 soft dots)
+    # 2. Subtle Low-Density Starfield (small varying opacity dots, NO bright flares)
     np.random.seed(42)
+    n_stars = 240
+    sx = np.random.randint(0, STAR_IMG_W, size=n_stars)
+    sy = np.random.randint(0, STAR_IMG_H, size=n_stars)
+    opacity = 0.12 + 0.45 * np.random.rand(n_stars)
 
-    # Micro background stars (550 stars, 1x1)
-    n_micro = 550
-    mx = np.random.randint(0, STAR_IMG_W, size=n_micro)
-    my = np.random.randint(0, STAR_IMG_H, size=n_micro)
-    mb = 0.25 + 0.45 * np.random.rand(n_micro)
-    for i in range(n_micro):
-        b = float(mb[i])
-        img[mx[i], my[i]] += [b * 0.72, b * 0.82, b * 1.0]
-
-    # Medium field stars (160 stars, 2x2 soft dots)
-    n_med = 160
-    sx = np.random.randint(0, STAR_IMG_W - 1, size=n_med)
-    sy = np.random.randint(0, STAR_IMG_H - 1, size=n_med)
-    sb = 0.45 + 0.45 * np.random.rand(n_med)
-    hue = np.random.rand(n_med)
-    for i in range(n_med):
-        b = float(sb[i])
+    for i in range(n_stars):
+        b = float(opacity[i])
         x, y = sx[i], sy[i]
-        col = [b * 0.80, b * 0.88, b * 1.0] if hue[i] < 0.6 else [b * 1.0, b * 0.90, b * 0.75]
-        img[x, y] += col
-        img[x + 1, y] += [col[0] * 0.4, col[1] * 0.4, col[2] * 0.4]
-        img[x, y + 1] += [col[0] * 0.4, col[1] * 0.4, col[2] * 0.4]
-
-    # Prominent field stars (40 stars, 3x3 soft core)
-    n_prom = 40
-    px_arr = np.random.randint(1, STAR_IMG_W - 1, size=n_prom)
-    py_arr = np.random.randint(1, STAR_IMG_H - 1, size=n_prom)
-    pb = 0.65 + 0.30 * np.random.rand(n_prom)
-    for i in range(n_prom):
-        b = float(pb[i])
-        x, y = px_arr[i], py_arr[i]
-        c_core = [b * 0.90, b * 0.94, b * 1.0]
-        c_soft = [b * 0.35, b * 0.40, b * 0.50]
-        img[x, y] += c_core
-        img[x - 1, y] += c_soft; img[x + 1, y] += c_soft
-        img[x, y - 1] += c_soft; img[x, y + 1] += c_soft
+        img[x, y] += [b * 0.70, b * 0.82, b * 1.0]
 
     np.clip(img, 0.0, 1.0, out=img)
     star_bg_field.from_numpy(img)
@@ -643,97 +614,74 @@ def main():
         canvas.lines(trail_line_vertices, width=0.0022, per_vertex_color=trail_line_colors)
 
         # =====================================================================
-        # --- GUI Overlays (Pass B: Space-Agency Mission Dashboard Aesthetic) ---
+        # --- GUI Overlays ---
         # =====================================================================
 
-        # Mission Palette & Color Hierarchy
-        CLR_HEAD  = (0.930, 0.950, 0.980)  # Header titles / crisp white
-        CLR_SEC   = (0.850, 0.880, 0.920)  # Section headers
-        CLR_BODY  = (0.847, 0.867, 0.890)  # Main text #d8dde3
-        CLR_LABEL = (0.478, 0.510, 0.565)  # Secondary / static labels #7a8290
-        CLR_HOST  = (0.910, 0.725, 0.290)  # Host star amber #e8b94a
-        CLR_INNER = (0.369, 0.784, 0.847)  # Inner planet cyan #5ec8d8
-        CLR_OUTER = (0.878, 0.541, 0.435)  # Outer planet coral #e08a6f
-        CLR_ROGUE = (0.788, 0.839, 1.000)  # Compact Intruder #c9d6ff
-        CLR_BOUND = (0.596, 0.765, 0.475)  # Green bound state
-        CLR_ALERT = (0.937, 0.424, 0.459)  # Red/Coral unbound alert
-
-        DIVIDER = "------------------------"
-
-        # Left Dock — Title, System Status, Legend & Controls
-        gui.begin("##left", 0.005, 0.005, 0.205, 0.925)
-        gui.text("STELLAR DISRUPTION", color=CLR_HEAD)
-        gui.text("Rogue Star Flyby Simulation", color=CLR_LABEL)
-        gui.text(DIVIDER, color=CLR_LABEL)
-
-        # Emphasized Live System Status
-        gui.text("SYSTEM STATUS", color=CLR_SEC)
-        gui.text(f"  State:   {'PAUSED' if paused else 'RUNNING'}", color=CLR_ALERT if paused else CLR_BOUND)
-        gui.text(f"  Time:    {sim_time:7.2f} yr", color=CLR_BODY)
-        gui.text(f"  Speed:   {speed_scale:7.2f}x", color=CLR_BODY)
-        gui.text(DIVIDER, color=CLR_LABEL)
-
-        # De-emphasized Static Celestial Legend
-        gui.text("CELESTIAL LEGEND", color=CLR_LABEL)
-        gui.text("  * Host Star   1.0 Msun", color=CLR_HOST)
-        gui.text("  o Inner Planet 1.0 AU", color=CLR_INNER)
-        gui.text("  o Outer Planet 1.8 AU", color=CLR_OUTER)
-        gui.text("  * Intruder     0.6 Msun", color=CLR_ROGUE)
-        gui.text(DIVIDER, color=CLR_LABEL)
-
-        # De-emphasized Static Controls
-        gui.text("MISSION CONTROLS", color=CLR_LABEL)
-        gui.text("  Space   Pause / Resume", color=CLR_LABEL)
-        gui.text("  S       Toggle Intruder", color=CLR_LABEL)
-        gui.text("  R       Reset System", color=CLR_LABEL)
-        gui.text("  Up/Dn   Adjust Speed", color=CLR_LABEL)
+        # Title bar — top center, compact
+        gui.begin("##title", 0.28, 0.01, 0.44, 0.075)
+        gui.text("  STELLAR DISRUPTION")
+        gui.text("  Explore how a passing star reshapes planetary orbits")
         gui.end()
 
-        # Right Dock — Scientific Measurements & Orbital Analysis
-        gui.begin("##right", 0.790, 0.005, 0.205, 0.925)
-        gui.text("ORBITAL ANALYSIS", color=CLR_HEAD)
-        gui.text("E = 0.5v^2 - GM/r", color=CLR_LABEL)
-        gui.text(DIVIDER, color=CLR_LABEL)
+        # Left panel — Legend + Controls, narrow, shifted down below title
+        gui.begin("##left", 0.01, 0.10, 0.22, 0.54)
+        gui.text("LEGEND")
+        gui.text("  * Host Star   Yellow  1.0 Msun")
+        gui.text("  o Inner Planet  Cyan  1.0 AU")
+        gui.text("  o Outer Planet Coral  1.8 AU")
+        gui.text("  * Intruder      Blue  0.6 Msun")
+        gui.text("")
+        gui.text("CONTROLS")
+        gui.text("  SPACE   Pause / Resume")
+        gui.text("  S       Toggle Intruder")
+        gui.text("  R       Reset")
+        gui.text("  UP/DN   Speed  +/-")
+        gui.text("")
+        gui.text("SIMULATION")
+        gui.text(f"  {'>> PAUSED <<' if paused else 'Running'}")
+        gui.text(f"  Time  {sim_time:.2f} yr")
+        gui.text(f"  Speed {speed_scale:.2f}x")
+        gui.end()
 
-        # Inner Planet Readout
-        gui.text("INNER PLANET", color=CLR_INNER)
-        gui.text(f"  r   {r1:7.3f} AU (ini {r0_1:.2f})", color=CLR_BODY)
-        gui.text(f"  v   {v1:7.3f} AU/yr", color=CLR_BODY)
-        gui.text(f"  E   {E1:+7.2f}", color=CLR_BODY)
-        gui.text(f"  dE  {dE1:+7.1f}%", color=CLR_ALERT if abs(dE1) > 10 else CLR_BODY)
-        gui.text(f"  {status1}", color=CLR_ALERT if "UNBOUND" in status1 else CLR_BOUND)
-        gui.text(DIVIDER, color=CLR_LABEL)
-
-        # Outer Planet Readout
-        gui.text("OUTER PLANET", color=CLR_OUTER)
-        gui.text(f"  r   {r2:7.3f} AU (ini {r0_2:.2f})", color=CLR_BODY)
-        gui.text(f"  v   {v2:7.3f} AU/yr", color=CLR_BODY)
-        gui.text(f"  E   {E2:+7.2f}", color=CLR_BODY)
-        gui.text(f"  dE  {dE2:+7.1f}%", color=CLR_ALERT if abs(dE2) > 10 else CLR_BODY)
-        gui.text(f"  {status2}", color=CLR_ALERT if "UNBOUND" in status2 else CLR_BOUND)
-        gui.text(DIVIDER, color=CLR_LABEL)
-
-        # Intruder Encounter Metrics
-        gui.text("INTRUDER ENCOUNTER", color=CLR_ROGUE)
+        # Right panel — Scientific measurements, narrow
+        gui.begin("##right", 0.77, 0.10, 0.22, 0.68)
+        gui.text("ORBITAL ANALYSIS")
+        gui.text("E = 0.5v^2 - GM/r")
+        gui.text("")
+        gui.text("INNER PLANET  (Cyan)")
+        gui.text(f"  r   {r1:.3f} AU (ini {r0_1:.2f})")
+        gui.text(f"  v   {v1:.3f} AU/yr")
+        gui.text(f"  E   {E1:+.2f}")
+        gui.text(f"  dE  {dE1:+.1f}%")
+        gui.text(f"  {status1}")
+        gui.text("")
+        gui.text("OUTER PLANET  (Coral)")
+        gui.text(f"  r   {r2:.3f} AU (ini {r0_2:.2f})")
+        gui.text(f"  v   {v2:.3f} AU/yr")
+        gui.text(f"  E   {E2:+.2f}")
+        gui.text(f"  dE  {dE2:+.1f}%")
+        gui.text(f"  {status2}")
+        gui.text("")
+        gui.text("INTRUDER ENCOUNTER")
         if rogue_enabled:
-            gui.text(f"  Dist  {d_rogue:7.3f} AU", color=CLR_BODY)
-            min_str = f"{min_rogue_dist:7.3f} AU" if min_rogue_dist < 999.0 else "---"
-            gui.text(f"  Min   {min_str}", color=CLR_BODY)
+            gui.text(f"  Dist  {d_rogue:.3f} AU")
+            if min_rogue_dist < 999.0:
+                gui.text(f"  Min   {min_rogue_dist:.3f} AU")
+            else:
+                gui.text("  Min   ---")
         else:
-            gui.text("  Status: DISABLED", color=CLR_LABEL)
-        gui.text(DIVIDER, color=CLR_LABEL)
-
-        # Energy Reference Guide
-        gui.text("ENERGY REFERENCE", color=CLR_LABEL)
-        gui.text("  E < 0   BOUND orbit", color=CLR_BOUND)
-        gui.text("  E >= 0  POTENTIALLY UNBOUND", color=CLR_ALERT)
-        gui.text("  (3-body transfer)", color=CLR_LABEL)
+            gui.text("  DISABLED")
+        gui.text("")
+        gui.text("ENERGY GUIDE")
+        gui.text("  E<0  BOUND orbit")
+        gui.text("  E>=0 POTENTIALLY UNBOUND")
+        gui.text("  (3-body transfer)")
         gui.end()
 
-        # Bottom Dock — Status Bar Strip Across Bottom
-        gui.begin("##statusbar", 0.0, 0.935, 1.0, 0.065)
+        # Bottom status bar — thin strip across bottom
+        gui.begin("##statusbar", 0.0, 0.93, 1.0, 0.07)
         rogue_str = f"Intruder: {'ACTIVE' if rogue_enabled else 'DISABLED'}"
-        gui.text(f"  {rogue_str}   |   Time: {sim_time:6.2f} yr   |   Phase: {phase_label}   |   Speed: {speed_scale:.2f}x", color=CLR_BODY)
+        gui.text(f"  {rogue_str}   |   Time: {sim_time:.2f} yr   |   Phase: {phase_label}   |   Speed: {speed_scale:.2f}x")
         gui.end()
 
         window.show()
