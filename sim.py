@@ -79,23 +79,11 @@ TOTAL_TRAIL_VERTICES = NUM_TRAILS * TRAIL_VERTICES_PER_BODY
 trail_line_vertices = ti.Vector.field(2, dtype=ti.f32, shape=TOTAL_TRAIL_VERTICES)
 trail_line_colors = ti.Vector.field(3, dtype=ti.f32, shape=TOTAL_TRAIL_VERTICES)
 
-# Starfield background image (RGBA rendered once on GPU)
+# Static backdrop tensor (near-black #05070c + low-density stars)
+star_bg_field = ti.Vector.field(3, dtype=ti.f32, shape=(STAR_IMG_W, STAR_IMG_H))
+
+# Final output RGBA image tensor uploaded to canvas
 star_img = ti.Vector.field(3, dtype=ti.f32, shape=(STAR_IMG_W, STAR_IMG_H))
-
-# Host Star & Intruder Render Fields
-host_star_pos = ti.Vector.field(2, dtype=ti.f32, shape=1)
-intruder_pos  = ti.Vector.field(2, dtype=ti.f32, shape=1)
-
-# Planet Directional Sphere Layers (shape 2 for Inner & Outer planets)
-planet_center_pos   = ti.Vector.field(2, dtype=ti.f32, shape=2)
-planet_shadow_pos   = ti.Vector.field(2, dtype=ti.f32, shape=2)
-planet_lit_pos      = ti.Vector.field(2, dtype=ti.f32, shape=2)
-planet_specular_pos = ti.Vector.field(2, dtype=ti.f32, shape=2)
-
-planet_shadow_colors   = ti.Vector.field(3, dtype=ti.f32, shape=2)
-planet_body_colors     = ti.Vector.field(3, dtype=ti.f32, shape=2)
-planet_lit_colors      = ti.Vector.field(3, dtype=ti.f32, shape=2)
-planet_specular_colors = ti.Vector.field(3, dtype=ti.f32, shape=2)
 
 # -----------------------------------------------------------------------------
 # 3. Physics & Simulation Kernels  (UNCHANGED)
@@ -185,49 +173,137 @@ def update_render_positions(scale_x: ti.f32, scale_y: ti.f32, rogue_enabled: ti.
             render_pos[i] = ti.Vector([nx, ny])
 
 
+@ti.func
+def smoothstep(edge0: ti.f32, edge1: ti.f32, x: ti.f32) -> ti.f32:
+    t = ti.max(0.0, ti.min(1.0, (x - edge0) / (edge1 - edge0 + 1e-6)))
+    return t * t * (3.0 - 2.0 * t)
+
+
 @ti.kernel
-def update_glow_positions(scale_x: ti.f32, scale_y: ti.f32, rogue_enabled: ti.i32):
-    """Updates rendering positions for host star, intruder, and directional planet sphere shading."""
-    # Host Star (index 0)
-    nx0 = 0.5 + pos[0][0] / (2.0 * scale_x)
-    ny0 = 0.5 + pos[0][1] / (2.0 * scale_y)
-    host_star_pos[0] = ti.Vector([nx0, ny0])
+def render_scene_pixel_shader(scale_x: ti.f32, scale_y: ti.f32, rogue_enabled: ti.i32):
+    """Per-pixel GPU rendering shader for true Gaussian star bloom and 3D planet sphere shading."""
+    aspect = float(STAR_IMG_W) / float(STAR_IMG_H)
 
-    # Compact Stellar Intruder (index 3)
-    if rogue_enabled == 1:
-        nx3 = 0.5 + pos[3][0] / (2.0 * scale_x)
-        ny3 = 0.5 + pos[3][1] / (2.0 * scale_y)
-        intruder_pos[0] = ti.Vector([nx3, ny3])
-    else:
-        intruder_pos[0] = ti.Vector([-10.0, -10.0])
+    # Host Star Center (body 0 at origin 0,0)
+    cx0 = 0.5 + pos[0][0] / (2.0 * scale_x)
+    cy0 = 0.5 + pos[0][1] / (2.0 * scale_y)
 
-    # Directional Sphere Shading for Planets (indices 1 & 2)
-    for p in range(2):
-        body_idx = p + 1
-        px = pos[body_idx][0]
-        py = pos[body_idx][1]
+    # Compact Stellar Intruder Center (body 3)
+    cx3 = 0.5 + pos[3][0] / (2.0 * scale_x)
+    cy3 = 0.5 + pos[3][1] / (2.0 * scale_y)
 
-        # Normalized screen center of planet
-        cx = 0.5 + px / (2.0 * scale_x)
-        cy = 0.5 + py / (2.0 * scale_y)
-        planet_center_pos[p] = ti.Vector([cx, cy])
+    # Planet Centers (body 1 & body 2)
+    cx1 = 0.5 + pos[1][0] / (2.0 * scale_x)
+    cy1 = 0.5 + pos[1][1] / (2.0 * scale_y)
 
-        # Vector pointing FROM planet TO host star (at origin 0, 0)
-        d_star = ti.sqrt(px * px + py * py) + 1e-6
-        ux = -px / d_star
-        uy = -py / d_star
+    cx2 = 0.5 + pos[2][0] / (2.0 * scale_x)
+    cy2 = 0.5 + pos[2][1] / (2.0 * scale_y)
 
-        # Screen-space direction vector
-        dx = ux / scale_x
-        dy = uy / scale_y
-        s_len = ti.sqrt(dx * dx + dy * dy) + 1e-6
-        su_x = dx / s_len
-        su_y = dy / s_len
+    for px, py in star_img:
+        # Base backdrop color (#05070c + starfield)
+        col = star_bg_field[px, py]
 
-        # Directional highlight offsets toward host star (scaled for ~45% larger planet radius)
-        planet_shadow_pos[p]   = ti.Vector([cx - su_x * 0.0020, cy - su_y * 0.0020])
-        planet_lit_pos[p]      = ti.Vector([cx + su_x * 0.0042, cy + su_y * 0.0042])
-        planet_specular_pos[p] = ti.Vector([cx + su_x * 0.0065, cy + su_y * 0.0065])
+        u = float(px) / float(STAR_IMG_W)
+        v = float(py) / float(STAR_IMG_H)
+
+        # ---------------------------------------------------------------------
+        # 1. Host Star Gaussian Bloom I(r) = I0 * exp(-r^2 / sigma^2)
+        # ---------------------------------------------------------------------
+        dx0 = (u - cx0) * aspect
+        dy0 = (v - cy0)
+        r0_sq = dx0 * dx0 + dy0 * dy0
+        r0 = ti.sqrt(r0_sq)
+
+        # Continuous Gaussian bloom (sigma = 0.028)
+        sigma0 = 0.028
+        I0_bloom = 0.65 * ti.exp(-r0_sq / (sigma0 * sigma0))
+        amber_glow = ti.Vector([0.91, 0.725, 0.29]) * I0_bloom
+        col += amber_glow
+
+        # Host Star Anti-Aliased Core Circle (radius 0.012)
+        if r0 <= 0.012:
+            t_core = smoothstep(0.012, 0.007, r0)
+            core_col = ti.Vector([0.98, 0.94, 0.82])
+            col = col * (1.0 - t_core) + core_col * t_core
+
+        # ---------------------------------------------------------------------
+        # 2. Compact Stellar Intruder Bloom (Body 3, if active)
+        # ---------------------------------------------------------------------
+        if rogue_enabled == 1:
+            dx3 = (u - cx3) * aspect
+            dy3 = (v - cy3)
+            r3_sq = dx3 * dx3 + dy3 * dy3
+            r3 = ti.sqrt(r3_sq)
+
+            sigma3 = 0.020
+            I3_bloom = 0.45 * ti.exp(-r3_sq / (sigma3 * sigma3))
+            blue_white_glow = ti.Vector([0.79, 0.84, 1.00]) * I3_bloom
+            col += blue_white_glow
+
+            if r3 <= 0.010:
+                t_core3 = smoothstep(0.010, 0.005, r3)
+                core3_col = ti.Vector([0.88, 0.92, 1.00])
+                col = col * (1.0 - t_core3) + core3_col * t_core3
+
+        # ---------------------------------------------------------------------
+        # 3. Planet 3D Sphere Shading (Inner Planet: Cyan, Outer Planet: Coral)
+        # ---------------------------------------------------------------------
+        for p in range(2):
+            cx_p = cx1 if p == 0 else cx2
+            cy_p = cy1 if p == 0 else cy2
+
+            dx_p = (u - cx_p) * aspect
+            dy_p = (v - cy_p)
+
+            # Visual radii for planets (~45% larger)
+            R_p = 0.0115 if p == 0 else 0.0125
+            r_p_sq = (dx_p * dx_p + dy_p * dy_p) / (R_p * R_p)
+
+            if r_p_sq <= 1.0:
+                # 3D Normal vector N = (nx, ny, nz)
+                nx = dx_p / R_p
+                ny = dy_p / R_p
+                nz = ti.sqrt(ti.max(0.0, 1.0 - r_p_sq))
+                N = ti.Vector([nx, ny, nz])
+
+                # Direction vector FROM planet center TO Host Star in 3D
+                dir_x = (cx0 - cx_p) * aspect
+                dir_y = (cy0 - cy_p)
+                dir_len = ti.sqrt(dir_x * dir_x + dir_y * dir_y) + 1e-6
+                L2D_x = dir_x / dir_len
+                L2D_y = dir_y / dir_len
+                L = ti.Vector([L2D_x, L2D_y, 0.25]).normalized()
+
+                # Lambertian Diffuse N dot L
+                NdotL = ti.max(0.0, N.dot(L))
+
+                # Smooth Lambertian Terminator (no visible banding)
+                diffuse = 0.03 + 0.97 * ti.pow(NdotL, 0.85)
+
+                # Specular Peak H = normalize(L + (0, 0, 1))
+                V = ti.Vector([0.0, 0.0, 1.0])
+                H = (L + V).normalized()
+                NdotH = ti.max(0.0, N.dot(H))
+                specular = ti.pow(NdotH, 20.0)
+
+                # Limb Darkening
+                limb = 1.0 - 0.30 * (1.0 - nz) * (1.0 - nz)
+
+                # Palette Base Colors:
+                # Inner planet (p=0): cool cyan #5ec8d8 -> [0.37, 0.78, 0.85]
+                # Outer planet (p=1): soft coral #e08a6f -> [0.88, 0.54, 0.435]
+                p_base = ti.Vector([0.37, 0.78, 0.85]) if p == 0 else ti.Vector([0.88, 0.54, 0.435])
+                p_spec_col = ti.Vector([1.0, 1.0, 1.0])
+
+                # Shaded surface
+                shaded_col = p_base * diffuse * limb + p_spec_col * specular * 0.45
+
+                # Edge Anti-Aliasing
+                edge_alpha = smoothstep(1.0, 0.85, ti.sqrt(r_p_sq))
+                col = col * (1.0 - edge_alpha) + shaded_col * edge_alpha
+
+        # Write final pixel color
+        star_img[px, py] = col
 
 
 @ti.kernel
@@ -298,99 +374,61 @@ def build_trail_lines(rogue_enabled: ti.i32):
 
 
 def generate_starfield():
-    """Generates a high-fidelity cinematic deep-space background once at startup."""
+    """Generates space-agency style near-black background #05070c with low-density stars once at startup."""
     import numpy as np
 
     # 1. Base Deep Space Canvas (WIN_W x WIN_H x 3)
-    # Coordinate grids normalized to [0, 1]
-    x_coords = np.linspace(0.0, 1.0, STAR_IMG_W, dtype=np.float32)
-    y_coords = np.linspace(0.0, 1.0, STAR_IMG_H, dtype=np.float32)
-    xx, yy = np.meshgrid(x_coords, y_coords, indexing='ij')
-
-    # Deep Space Void Base (Navy/Indigo gradient)
     img = np.zeros((STAR_IMG_W, STAR_IMG_H, 3), dtype=np.float32)
-    img[:, :, 0] = 0.008 + 0.006 * (1.0 - yy)  # Red
-    img[:, :, 1] = 0.010 + 0.008 * (1.0 - yy)  # Green
-    img[:, :, 2] = 0.022 + 0.016 * (1.0 - yy)  # Blue
 
-    # 2. Subtle Nebula Clouds (Purple, Blue, Reddish filaments)
-    # Purple Nebula (Top Right)
-    d_purple2 = (xx - 0.75)**2 + (yy - 0.30)**2
-    neb_purple = np.exp(-d_purple2 / 0.12)
-    img[:, :, 0] += neb_purple * 0.022
-    img[:, :, 1] += neb_purple * 0.008
-    img[:, :, 2] += neb_purple * 0.038
+    # Base background: near-black #05070c -> RGB [0.016, 0.022, 0.040]
+    for py in range(STAR_IMG_H):
+        t = py / float(STAR_IMG_H)
+        img[:, py, 0] = 0.016 + 0.005 * (1.0 - t)  # Red
+        img[:, py, 1] = 0.022 + 0.006 * (1.0 - t)  # Green
+        img[:, py, 2] = 0.040 + 0.010 * (1.0 - t)  # Blue
 
-    # Deep Cyan/Blue Nebula (Bottom Left)
-    d_cyan2 = (xx - 0.22)**2 + (yy - 0.75)**2
-    neb_cyan = np.exp(-d_cyan2 / 0.15)
-    img[:, :, 0] += neb_cyan * 0.006
-    img[:, :, 1] += neb_cyan * 0.024
-    img[:, :, 2] += neb_cyan * 0.036
-
-    # Reddish Cosmic Filament (Center Top)
-    d_red2 = (xx - 0.45)**2 + (yy - 0.18)**2
-    neb_red = np.exp(-d_red2 / 0.08)
-    img[:, :, 0] += neb_red * 0.020
-    img[:, :, 1] += neb_red * 0.006
-    img[:, :, 2] += neb_red * 0.012
-
-    # Clip background glow so it never interferes with UI or trail readability
-    np.clip(img, 0.0, 0.08, out=img)
-
-    # 3. Dense Multi-Layer Starfield
+    # 2. Restored Space-Agency Low-Density Starfield (750 stars, 1x1 to 3x3 soft dots)
     np.random.seed(42)
 
-    # Tier 1: Faint background micro-stars
-    n_micro = 900
+    # Micro background stars (550 stars, 1x1)
+    n_micro = 550
     mx = np.random.randint(0, STAR_IMG_W, size=n_micro)
     my = np.random.randint(0, STAR_IMG_H, size=n_micro)
-    mb = 0.15 + 0.35 * np.random.rand(n_micro)
+    mb = 0.25 + 0.45 * np.random.rand(n_micro)
     for i in range(n_micro):
         b = float(mb[i])
-        img[mx[i], my[i]] += [b * 0.75, b * 0.85, b * 1.0]
+        img[mx[i], my[i]] += [b * 0.72, b * 0.82, b * 1.0]
 
-    # Tier 2: Medium field stars
-    n_med = 350
-    sx = np.random.randint(0, STAR_IMG_W, size=n_med)
-    sy = np.random.randint(0, STAR_IMG_H, size=n_med)
-    sb = 0.40 + 0.40 * np.random.rand(n_med)
+    # Medium field stars (160 stars, 2x2 soft dots)
+    n_med = 160
+    sx = np.random.randint(0, STAR_IMG_W - 1, size=n_med)
+    sy = np.random.randint(0, STAR_IMG_H - 1, size=n_med)
+    sb = 0.45 + 0.45 * np.random.rand(n_med)
     hue = np.random.rand(n_med)
     for i in range(n_med):
         b = float(sb[i])
         x, y = sx[i], sy[i]
-        # Color variation: white, cyan, yellow, warm tint
-        if hue[i] < 0.6:
-            col = np.array([b * 0.85, b * 0.90, b * 1.0], dtype=np.float32)
-        elif hue[i] < 0.85:
-            col = np.array([b * 1.0, b * 0.92, b * 0.75], dtype=np.float32)
-        else:
-            col = np.array([b * 1.0, b * 0.70, b * 0.80], dtype=np.float32)
-
+        col = [b * 0.80, b * 0.88, b * 1.0] if hue[i] < 0.6 else [b * 1.0, b * 0.90, b * 0.75]
         img[x, y] += col
-        if b > 0.65 and x + 1 < STAR_IMG_W and y + 1 < STAR_IMG_H:
-            img[x+1, y] += col * 0.35
-            img[x, y+1] += col * 0.35
+        img[x + 1, y] += [col[0] * 0.4, col[1] * 0.4, col[2] * 0.4]
+        img[x, y + 1] += [col[0] * 0.4, col[1] * 0.4, col[2] * 0.4]
 
-    # Tier 3: Bright foreground stars with soft halo glow
-    n_bright = 45
-    bx = np.random.randint(2, STAR_IMG_W - 2, size=n_bright)
-    by = np.random.randint(2, STAR_IMG_H - 2, size=n_bright)
-    bb = 0.75 + 0.25 * np.random.rand(n_bright)
-    for i in range(n_bright):
-        b = float(bb[i])
-        x, y = bx[i], by[i]
-        core_col = np.array([b, b, b], dtype=np.float32)
-        halo_col = np.array([b * 0.4, b * 0.5, b * 0.7], dtype=np.float32)
-
-        # Core
-        img[x, y] += core_col
-        # Cross flare & halo
-        img[x-1, y] += halo_col * 0.5; img[x+1, y] += halo_col * 0.5
-        img[x, y-1] += halo_col * 0.5; img[x, y+1] += halo_col * 0.5
+    # Prominent field stars (40 stars, 3x3 soft core)
+    n_prom = 40
+    px_arr = np.random.randint(1, STAR_IMG_W - 1, size=n_prom)
+    py_arr = np.random.randint(1, STAR_IMG_H - 1, size=n_prom)
+    pb = 0.65 + 0.30 * np.random.rand(n_prom)
+    for i in range(n_prom):
+        b = float(pb[i])
+        x, y = px_arr[i], py_arr[i]
+        c_core = [b * 0.90, b * 0.94, b * 1.0]
+        c_soft = [b * 0.35, b * 0.40, b * 0.50]
+        img[x, y] += c_core
+        img[x - 1, y] += c_soft; img[x + 1, y] += c_soft
+        img[x, y - 1] += c_soft; img[x, y + 1] += c_soft
 
     np.clip(img, 0.0, 1.0, out=img)
-    star_img.from_numpy(img)
+    star_bg_field.from_numpy(img)
 
 
 
@@ -446,19 +484,6 @@ def setup_initial_conditions():
     # Body 3 (Compact Stellar Intruder): Cool Blue-White (#c9d6ff)
     body_colors[3] = [0.79, 0.84, 1.00]
     render_radius[3] = 0.010
-
-    # Directional Sphere Shading Colors for Planets (Enhanced Contrast)
-    # Planet 1 (Inner - Cool Cyan #5ec8d8)
-    planet_body_colors[0]     = [0.37, 0.78, 0.85]   # Base #5ec8d8
-    planet_shadow_colors[0]   = [0.02, 0.09, 0.12]   # Deep limb shadow
-    planet_lit_colors[0]      = [0.72, 0.94, 0.98]   # Lit highlight #b8f0fa
-    planet_specular_colors[0] = [1.00, 1.00, 1.00]   # Crisp white specular peak
-
-    # Planet 2 (Outer - Soft Coral #e08a6f)
-    planet_body_colors[1]     = [0.88, 0.54, 0.435]  # Base #e08a6f
-    planet_shadow_colors[1]   = [0.14, 0.05, 0.03]   # Deep limb shadow
-    planet_lit_colors[1]      = [0.98, 0.78, 0.70]   # Lit highlight #fac7b3
-    planet_specular_colors[1] = [1.00, 1.00, 1.00]   # Crisp white specular peak
 
     reset_to_initial()
     compute_accelerations(0)
@@ -547,7 +572,6 @@ def main():
 
         # Update screen coordinates and trail line geometry
         update_render_positions(scale_x, scale_y, rogue_flag)
-        update_glow_positions(scale_x, scale_y, rogue_flag)
         build_trail_lines(rogue_flag)
 
         # --- Real-Time Scientific Impact Calculations (UNCHANGED) ---
@@ -607,104 +631,109 @@ def main():
         # --- Drawing Canvas (Pass A Space-Agency Palette & Sphere Shading) ---
         # =====================================================================
 
-        # 1. Background (Near-black #05070c with low-density stars)
+        # =====================================================================
+        # --- Drawing Canvas (Path 1 Per-Pixel GPU Shader Rendering) ---
+        # =====================================================================
+
+        # 1. Execute per-pixel GPU shader (Gaussian Star Bloom + 3D Planet Shading + Intruder Bloom)
+        render_scene_pixel_shader(scale_x, scale_y, rogue_flag)
         canvas.set_image(star_img)
 
         # 2. Orbit & Flyby Trails (power-law fade to transparent at tail)
         canvas.lines(trail_line_vertices, width=0.0022, per_vertex_color=trail_line_colors)
 
-        # 3. Host Star Radial Gradient & Visible Soft Bloom (~2.5x star radius)
-        canvas.circles(host_star_pos, radius=0.035, color=(0.55, 0.40, 0.12))  # Outer soft bloom (~2.5x)
-        canvas.circles(host_star_pos, radius=0.024, color=(0.82, 0.62, 0.18))  # Mid glow (~1.7x)
-        canvas.circles(host_star_pos, radius=0.016, color=(0.95, 0.82, 0.35))  # Inner warm halo (~1.2x)
-
-        # 4. Compact Stellar Intruder Glow & Core (if active)
-        if rogue_enabled:
-            canvas.circles(intruder_pos, radius=0.018, color=(0.22, 0.25, 0.38))
-            canvas.circles(intruder_pos, radius=0.010, color=(0.85, 0.89, 1.00))
-
-        # 5. Host Star Core Circle (bright white-gold center)
-        canvas.circles(host_star_pos, radius=0.012, color=(0.98, 0.94, 0.82))
-
-        # 6. Planets Directional Sphere Shading (~45% larger radii for camera zoom visibility)
-        #    Layer A: Dark limb shadow base
-        canvas.circles(planet_shadow_pos, radius=0.0130, per_vertex_color=planet_shadow_colors)
-        #    Layer B: Main planet body circle
-        canvas.circles(planet_center_pos, radius=0.0110, per_vertex_color=planet_body_colors)
-        #    Layer C: Lit highlight circle (offset toward host star)
-        canvas.circles(planet_lit_pos, radius=0.0070, per_vertex_color=planet_lit_colors)
-        #    Layer D: Specular peak circle (offset further toward host star)
-        canvas.circles(planet_specular_pos, radius=0.0035, per_vertex_color=planet_specular_colors)
-
         # =====================================================================
-        # --- GUI Overlays ---
+        # --- GUI Overlays (Pass B: Space-Agency Mission Dashboard Aesthetic) ---
         # =====================================================================
 
-        # Title bar — top center, compact
-        gui.begin("##title", 0.28, 0.01, 0.44, 0.075)
-        gui.text("  STELLAR DISRUPTION")
-        gui.text("  Explore how a passing star reshapes planetary orbits")
+        # Mission Palette & Color Hierarchy
+        CLR_HEAD  = (0.930, 0.950, 0.980)  # Header titles / crisp white
+        CLR_SEC   = (0.850, 0.880, 0.920)  # Section headers
+        CLR_BODY  = (0.847, 0.867, 0.890)  # Main text #d8dde3
+        CLR_LABEL = (0.478, 0.510, 0.565)  # Secondary / static labels #7a8290
+        CLR_HOST  = (0.910, 0.725, 0.290)  # Host star amber #e8b94a
+        CLR_INNER = (0.369, 0.784, 0.847)  # Inner planet cyan #5ec8d8
+        CLR_OUTER = (0.878, 0.541, 0.435)  # Outer planet coral #e08a6f
+        CLR_ROGUE = (0.788, 0.839, 1.000)  # Compact Intruder #c9d6ff
+        CLR_BOUND = (0.596, 0.765, 0.475)  # Green bound state
+        CLR_ALERT = (0.937, 0.424, 0.459)  # Red/Coral unbound alert
+
+        DIVIDER = "------------------------"
+
+        # Left Dock — Title, System Status, Legend & Controls
+        gui.begin("##left", 0.005, 0.005, 0.205, 0.925)
+        gui.text("STELLAR DISRUPTION", color=CLR_HEAD)
+        gui.text("Rogue Star Flyby Simulation", color=CLR_LABEL)
+        gui.text(DIVIDER, color=CLR_LABEL)
+
+        # Emphasized Live System Status
+        gui.text("SYSTEM STATUS", color=CLR_SEC)
+        gui.text(f"  State:   {'PAUSED' if paused else 'RUNNING'}", color=CLR_ALERT if paused else CLR_BOUND)
+        gui.text(f"  Time:    {sim_time:7.2f} yr", color=CLR_BODY)
+        gui.text(f"  Speed:   {speed_scale:7.2f}x", color=CLR_BODY)
+        gui.text(DIVIDER, color=CLR_LABEL)
+
+        # De-emphasized Static Celestial Legend
+        gui.text("CELESTIAL LEGEND", color=CLR_LABEL)
+        gui.text("  * Host Star   1.0 Msun", color=CLR_HOST)
+        gui.text("  o Inner Planet 1.0 AU", color=CLR_INNER)
+        gui.text("  o Outer Planet 1.8 AU", color=CLR_OUTER)
+        gui.text("  * Intruder     0.6 Msun", color=CLR_ROGUE)
+        gui.text(DIVIDER, color=CLR_LABEL)
+
+        # De-emphasized Static Controls
+        gui.text("MISSION CONTROLS", color=CLR_LABEL)
+        gui.text("  Space   Pause / Resume", color=CLR_LABEL)
+        gui.text("  S       Toggle Intruder", color=CLR_LABEL)
+        gui.text("  R       Reset System", color=CLR_LABEL)
+        gui.text("  Up/Dn   Adjust Speed", color=CLR_LABEL)
         gui.end()
 
-        # Left panel — Legend + Controls, narrow, shifted down below title
-        gui.begin("##left", 0.01, 0.10, 0.22, 0.54)
-        gui.text("LEGEND")
-        gui.text("  * Host Star   Yellow  1.0 Msun")
-        gui.text("  o Inner Planet  Cyan  1.0 AU")
-        gui.text("  o Outer Planet Coral  1.8 AU")
-        gui.text("  * Intruder      Blue  0.6 Msun")
-        gui.text("")
-        gui.text("CONTROLS")
-        gui.text("  SPACE   Pause / Resume")
-        gui.text("  S       Toggle Intruder")
-        gui.text("  R       Reset")
-        gui.text("  UP/DN   Speed  +/-")
-        gui.text("")
-        gui.text("SIMULATION")
-        gui.text(f"  {'>> PAUSED <<' if paused else 'Running'}")
-        gui.text(f"  Time  {sim_time:.2f} yr")
-        gui.text(f"  Speed {speed_scale:.2f}x")
-        gui.end()
+        # Right Dock — Scientific Measurements & Orbital Analysis
+        gui.begin("##right", 0.790, 0.005, 0.205, 0.925)
+        gui.text("ORBITAL ANALYSIS", color=CLR_HEAD)
+        gui.text("E = 0.5v^2 - GM/r", color=CLR_LABEL)
+        gui.text(DIVIDER, color=CLR_LABEL)
 
-        # Right panel — Scientific measurements, narrow
-        gui.begin("##right", 0.77, 0.10, 0.22, 0.68)
-        gui.text("ORBITAL ANALYSIS")
-        gui.text("E = 0.5v^2 - GM/r")
-        gui.text("")
-        gui.text("INNER PLANET  (Cyan)")
-        gui.text(f"  r   {r1:.3f} AU (ini {r0_1:.2f})")
-        gui.text(f"  v   {v1:.3f} AU/yr")
-        gui.text(f"  E   {E1:+.2f}")
-        gui.text(f"  dE  {dE1:+.1f}%")
-        gui.text(f"  {status1}")
-        gui.text("")
-        gui.text("OUTER PLANET  (Coral)")
-        gui.text(f"  r   {r2:.3f} AU (ini {r0_2:.2f})")
-        gui.text(f"  v   {v2:.3f} AU/yr")
-        gui.text(f"  E   {E2:+.2f}")
-        gui.text(f"  dE  {dE2:+.1f}%")
-        gui.text(f"  {status2}")
-        gui.text("")
-        gui.text("INTRUDER ENCOUNTER")
+        # Inner Planet Readout
+        gui.text("INNER PLANET", color=CLR_INNER)
+        gui.text(f"  r   {r1:7.3f} AU (ini {r0_1:.2f})", color=CLR_BODY)
+        gui.text(f"  v   {v1:7.3f} AU/yr", color=CLR_BODY)
+        gui.text(f"  E   {E1:+7.2f}", color=CLR_BODY)
+        gui.text(f"  dE  {dE1:+7.1f}%", color=CLR_ALERT if abs(dE1) > 10 else CLR_BODY)
+        gui.text(f"  {status1}", color=CLR_ALERT if "UNBOUND" in status1 else CLR_BOUND)
+        gui.text(DIVIDER, color=CLR_LABEL)
+
+        # Outer Planet Readout
+        gui.text("OUTER PLANET", color=CLR_OUTER)
+        gui.text(f"  r   {r2:7.3f} AU (ini {r0_2:.2f})", color=CLR_BODY)
+        gui.text(f"  v   {v2:7.3f} AU/yr", color=CLR_BODY)
+        gui.text(f"  E   {E2:+7.2f}", color=CLR_BODY)
+        gui.text(f"  dE  {dE2:+7.1f}%", color=CLR_ALERT if abs(dE2) > 10 else CLR_BODY)
+        gui.text(f"  {status2}", color=CLR_ALERT if "UNBOUND" in status2 else CLR_BOUND)
+        gui.text(DIVIDER, color=CLR_LABEL)
+
+        # Intruder Encounter Metrics
+        gui.text("INTRUDER ENCOUNTER", color=CLR_ROGUE)
         if rogue_enabled:
-            gui.text(f"  Dist  {d_rogue:.3f} AU")
-            if min_rogue_dist < 999.0:
-                gui.text(f"  Min   {min_rogue_dist:.3f} AU")
-            else:
-                gui.text("  Min   ---")
+            gui.text(f"  Dist  {d_rogue:7.3f} AU", color=CLR_BODY)
+            min_str = f"{min_rogue_dist:7.3f} AU" if min_rogue_dist < 999.0 else "---"
+            gui.text(f"  Min   {min_str}", color=CLR_BODY)
         else:
-            gui.text("  DISABLED")
-        gui.text("")
-        gui.text("ENERGY GUIDE")
-        gui.text("  E<0  BOUND orbit")
-        gui.text("  E>=0 POTENTIALLY UNBOUND")
-        gui.text("  (3-body transfer)")
+            gui.text("  Status: DISABLED", color=CLR_LABEL)
+        gui.text(DIVIDER, color=CLR_LABEL)
+
+        # Energy Reference Guide
+        gui.text("ENERGY REFERENCE", color=CLR_LABEL)
+        gui.text("  E < 0   BOUND orbit", color=CLR_BOUND)
+        gui.text("  E >= 0  POTENTIALLY UNBOUND", color=CLR_ALERT)
+        gui.text("  (3-body transfer)", color=CLR_LABEL)
         gui.end()
 
-        # Bottom status bar — thin strip across bottom
-        gui.begin("##statusbar", 0.0, 0.93, 1.0, 0.07)
+        # Bottom Dock — Status Bar Strip Across Bottom
+        gui.begin("##statusbar", 0.0, 0.935, 1.0, 0.065)
         rogue_str = f"Intruder: {'ACTIVE' if rogue_enabled else 'DISABLED'}"
-        gui.text(f"  {rogue_str}   |   Time: {sim_time:.2f} yr   |   Phase: {phase_label}   |   Speed: {speed_scale:.2f}x")
+        gui.text(f"  {rogue_str}   |   Time: {sim_time:6.2f} yr   |   Phase: {phase_label}   |   Speed: {speed_scale:.2f}x", color=CLR_BODY)
         gui.end()
 
         window.show()
