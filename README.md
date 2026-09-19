@@ -53,11 +53,10 @@ independently conserved during the encounter — this is expected, not an error.
 Initial conditions are manually chosen to demonstrate gravitational disruption.
 
 ## Validation
-A timestep convergence test compared results at dt and dt/2 for an identical 
-close encounter. Energy values agreed to within ~0.06% relative difference, 
-confirming the simulation is numerically converged rather than producing a 
-timestep artifact. Close encounters remain sensitive to timestep and initial 
-conditions by nature — this was checked, not assumed.
+A timestep refinement test compared dt = 0.00002 with dt/2 = 0.00001.
+The refined runs showed improved numerical agreement, with energy differences
+below 0.4%. Close encounters remain sensitive to timestep and initial
+conditions.
 
 ## Controls
 | Key | Action |
@@ -80,7 +79,7 @@ conditions by nature — this was checked, not assumed.
 
 ## Running it
 ```bash
-git clone [your repo URL]
+git clone https://github.com/vaibhavitej-a11y/UNBOUND
 cd [your repo folder]
 pip install taichi numpy
 python sim.py
@@ -95,6 +94,3 @@ independently verified on a non-GPU machine as of submission.
 ## Technology
 Python, Taichi (GPU-accelerated), Velocity Verlet integration. Single-file 
 implementation: `sim.py`.
-
-## License
-[Add your preferred license before publishing]
