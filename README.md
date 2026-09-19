@@ -77,6 +77,9 @@ conditions.
 - Visual sizes are enlarged for clarity, not to scale
 - Bound/unbound classification is an approximation in this multi-body system
 
+## Simulation Preview
+![UNBOUND Simulation](assets/unbound.png)
+
 ## Running it
 ```bash
 git clone https://github.com/vaibhavitej-a11y/UNBOUND
