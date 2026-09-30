@@ -1,5 +1,9 @@
 # UNBOUND
-### Exploring the Gravitational Chaos Caused by a Rogue Star
+### *When a rogue star rewrites planetary destiny.*
+
+> **Watch gravity alone decide a planet's fate.**
+
+A real-time 2D gravitational simulation where a passing rogue star tears through a planetary system and **nothing is scripted**.
 
 ## Simulation Preview
 
