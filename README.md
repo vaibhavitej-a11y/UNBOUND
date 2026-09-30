@@ -109,5 +109,4 @@ independently verified on a non-GPU machine as of submission.
 Python, Taichi (GPU-accelerated), Velocity Verlet integration. Single-file 
 implementation: `sim.py`.
 
-## License
-[Add your preferred license before publishing]
+
