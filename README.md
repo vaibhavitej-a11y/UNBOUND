@@ -76,9 +76,12 @@ conditions.
   compact object
 - Visual sizes are enlarged for clarity, not to scale
 - Bound/unbound classification is an approximation in this multi-body system
-
-## Simulation Preview
-![UNBOUND Simulation](assets/unbound.png)
+- The host star is fixed at the origin and does not respond to gravitational 
+  forces from the planets or intruder — as a result, linear momentum is not 
+  conserved across the full system. This is a common simplification in 
+  restricted N-body problems, but means the simulation is not a fully 
+  mutual N-body system despite the "N-body gravity" framing elsewhere in 
+  this README.
 
 ## Running it
 ```bash
