@@ -1,6 +1,10 @@
 # UNBOUND
 ### Exploring the Gravitational Chaos Caused by a Rogue Star
 
+## Simulation Preview
+
+![UNBOUND Simulation](assets/preview.png)
+
 ## What this demonstrates
 An interactive 2D gravitational simulation showing how a passing compact 
 stellar object disturbs a planetary system, alters planetary orbits, and can 
@@ -76,11 +80,17 @@ conditions.
   compact object
 - Visual sizes are enlarged for clarity, not to scale
 - Bound/unbound classification is an approximation in this multi-body system
+- The host star is fixed at the origin and does not respond to gravitational 
+  forces from the planets or intruder — as a result, linear momentum is not 
+  conserved across the full system. This is a common simplification in 
+  restricted N-body problems, but means the simulation is not a fully 
+  mutual N-body system despite the "N-body gravity" framing elsewhere in 
+  this README.
 
 ## Running it
 ```bash
 git clone https://github.com/vaibhavitej-a11y/UNBOUND
-cd [your repo folder]
+cd UNBOUND
 pip install taichi numpy
 python sim.py
 ```
@@ -94,3 +104,6 @@ independently verified on a non-GPU machine as of submission.
 ## Technology
 Python, Taichi (GPU-accelerated), Velocity Verlet integration. Single-file 
 implementation: `sim.py`.
+
+## License
+[Add your preferred license before publishing]
